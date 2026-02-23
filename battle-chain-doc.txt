@@ -1,0 +1,3406 @@
+# BattleChain Docs
+
+> BattleChain is a pre-mainnet, post-testnet blockchain for stress-testing smart contracts with real funds. Protocols deploy audited contracts, whitehats legally attack them for bounties under Safe Harbor protection, and battle-tested contracts promote to mainnet.
+
+---
+
+## Overview
+
+### Battlechain
+
+*PvP Security Blockchain - Trial by Fire*
+
+Get Started
+  
+
+  
+  The Problem
+
+Web3 has a fundamental gap in its development lifecycle. Code goes from audit to mainnet with nothing in between — and the industry pays for it.
+
+Projects go from $0 to $5M TVL overnight after an audit. Bug bounties don't attract serious testing.
+
+The industry loses billions to preventable exploits.
+
+  **Web2 Development**
+Dev → Staging → Production
+    Staging uses real-like data. Issues are found before users are affected.
+  **Web3 Today**
+Dev → Testnet → Mainnet
+    Testnet uses fake money. Issues are found after millions are at risk.
+  **With BattleChain**
+Dev → Testnet → BattleChain → Mainnet
+    Real funds, controlled risk. Issues found before they matter.
+
+## How It Works
+
+BattleChain is a **pre-mainnet, post-testnet environment** with real funds. Protocols deploy audited contracts, whitehats legally attack them for bounties, and battle-tested contracts promote to mainnet with confidence.
+
+```
+Audit → Deploy to BattleChain → Stress Test (Attack Mode) → Promote to Production → Deploy to Mainnet
+```
+
+Every contract on BattleChain exists in one of two modes:
+
+  **Attack Mode**
+Open season for ethical hacking. Whitehats can legally exploit vulnerabilities, earn bounties, and operate under Safe Harbor protection. Protocols learn about weaknesses before they matter.
+  **Production Mode**
+Protected like mainnet. No Safe Harbor coverage for attacks — same security expectations apply. Contracts reach this state once battle-tested and DAO-promoted.
+
+### Why an L2?
+
+BattleChain runs as a ZKSync-based L2 to keep attacks isolated from mainnet liquidity, track contract states at the protocol level, and keep deployment costs low. It's purpose-built for this workflow — not a repurposed testnet.
+
+## Learn More
+
+  - [The Contract Lifecycle](/battlechain/explanation/contract-lifecycle): Learn how contracts move through attack mode to production
+
+  - [Safe Harbor Protection](/battlechain/explanation/safe-harbor): Understand the legal framework protecting whitehats
+
+  - [Best Practices](/battlechain/explanation/best-practices): Guidelines for protocols, whitehats, and DAO members
+
+> **Note:** BattleChain Testnet is live. Mainnet details will be announced soon.
+
+---
+
+## Quickstart
+
+### Deploy Your First Contract
+
+*Deploy a vulnerable vault to BattleChain, create a Safe Harbor agreement, and open it for attack.*
+
+🏛
+  
+    You are the Protocol
+    Your contract is audited. Time to stress-test it for real.
+    You'll deploy a deliberately vulnerable vault, put it under a Safe Harbor agreement, and open it to whitehat attack — before anything like this can happen on mainnet.
+  
+
+## Prerequisites
+
+### Git
+
+```bash
+git --version
+```
+
+If not installed: [git-scm.com](https://git-scm.com/)
+
+### Foundry
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+forge --version
+```
+
+If you hit issues, see the [Foundry installation guide](https://book.getfoundry.sh/getting-started/installation).
+
+### Just
+
+`just` is a command runner used to execute the repo's scripts cleanly. Install it with:
+
+```bash
+brew install just
+```
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/.local/bin
+```
+```bash
+cargo install just
+```
+
+Verify: `just --version`
+
+### A Wallet with BattleChain Testnet ETH
+
+You'll need an EVM wallet with ETH on BattleChain to pay for gas. Three steps:
+
+#### 1. Add BattleChain to your wallet
+
+| Field | Value |
+|-------|-------|
+| Network Name | BattleChain Testnet |
+| RPC URL | `https://testnet.battlechain.com:3051` |
+| Chain ID | `627` |
+
+> **Note:** See [Add BattleChain to MetaMask](/battlechain/how-to/add-battlechain-to-metamask) for a step-by-step guide.
+
+#### 2. Get Sepolia ETH
+
+You need Sepolia ETH to bridge to BattleChain. Go to the [Google Cloud faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia), paste your wallet address, and request testnet ETH. You only need a small amount — 0.05 ETH is plenty for this tutorial.
+
+#### 3. Bridge to BattleChain
+
+Open the [BattleChain Portal](https://portal.battlechain.com/bridge), connect your wallet, and bridge Sepolia ETH to BattleChain Testnet:
+
+1. Select **Sepolia** as the source network and **BattleChain Testnet** as the destination
+2. Enter the amount to bridge
+3. Confirm the transaction in your wallet
+
+Wait for the bridge transaction to finalize — this usually takes a few minutes. Once your BattleChain balance shows ETH, you're ready to deploy.
+
+---
+
+## Setup
+
+Clone the starter repo and install dependencies:
+
+```bash
+git clone https://github.com/Cyfrin/battlechain-starter
+cd battlechain-starter
+forge install
+```
+
+### Import your key into Foundry's keystore
+
+Never put your private key in a file. Instead, import it into Foundry's encrypted keystore:
+
+```bash
+cast wallet import battlechain --interactive
+```
+
+You'll be prompted to paste your private key and set an encryption password. The key is stored encrypted at `~/.foundry/keystores/battlechain` — the password is required every time you run a script. Your raw private key is never written to disk.
+
+Verify it imported correctly:
+
+```bash
+cast wallet list
+```
+
+### Configure `.env`
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and set your values. Note that `SENDER_ADDRESS` is your **public wallet address** — no private key goes here:
+
+```bash
+# Your public wallet address
+SENDER_ADDRESS=0x...your_wallet_address...
+
+# Filled in after: just setup
+TOKEN_ADDRESS=
+VAULT_ADDRESS=
+
+# Filled in after: just create-agreement
+AGREEMENT_ADDRESS=
+
+# Set to your wallet address (same as SENDER_ADDRESS for this tutorial)
+RECOVERY_ADDRESS=
+```
+
+---
+
+## What You're Deploying
+
+Before running anything, understand what you're putting on-chain. Open `src/VulnerableVault.sol` and look at `withdrawAll()`:
+
+```solidity
+function withdrawAll() external {
+    uint256 amount = balances[msg.sender];
+    require(amount > 0, "nothing to withdraw");
+
+    // ❌ INTERACTION before EFFECT
+    TOKEN.transfer(msg.sender, amount); // external call — may trigger a hook
+
+    // ❌ Balance cleared after the transfer — too late
+    balances[msg.sender] = 0;
+}
+```
+
+This is a **CEI (Checks-Effects-Interactions) violation**. The vault transfers tokens *before* zeroing the caller's balance. If the token notifies the recipient on transfer — which `MockToken` does via its hook system — an attacker can re-enter `withdrawAll()` before the balance ever hits zero, draining the vault entirely.
+
+The correct order is:
+
+```solidity
+// ✅ Effect first, then interaction
+balances[msg.sender] = 0;
+TOKEN.transfer(msg.sender, amount);
+```
+
+You've shipped the wrong version. That's the point.
+
+---
+
+## Step 1 — Deploy
+
+`just setup` deploys `MockToken` and `VulnerableVault`, then seeds the vault with 1,000 tokens to simulate protocol liquidity:
+
+```bash
+just setup
+```
+
+Expected output:
+
+```
+MockToken deployed: 0x...
+VulnerableVault deployed: 0x...
+Vault seeded with 1000 tokens
+
+--- Add to your .env ---
+TOKEN_ADDRESS=0x...
+VAULT_ADDRESS=0x...
+```
+
+Copy both addresses into your `.env`.
+
+> **Check:** Your vault is live on BattleChain and registered with the AttackRegistry.
+
+---
+
+## Step 2 — Create a Safe Harbor Agreement
+
+The Safe Harbor agreement defines the rules of engagement: which contracts are in scope, what bounty whitehats earn, and where recovered funds go.
+
+Make sure `VAULT_ADDRESS` is set in `.env`, then:
+
+```bash
+just create-agreement
+```
+
+This script:
+- Puts your vault in scope on BattleChain (`eip155:627`)
+- Sets a **10% bounty**, retainable from recovered funds
+- Sets your wallet as the recovery address — drained funds come back here
+- Locks terms for **30 days**
+
+Expected output:
+
+```
+Agreement created: 0x...
+Commitment window extended 30 days
+Safe Harbor adopted
+
+--- Add to your .env ---
+AGREEMENT_ADDRESS=0x...
+```
+
+Copy `AGREEMENT_ADDRESS` into your `.env` and set `RECOVERY_ADDRESS` to your deployer wallet address.
+
+---
+
+## Step 3 — Request Attack Mode
+
+Submit your vault for DAO review:
+
+```bash
+just request-attack-mode
+```
+
+Your agreement is now in `ATTACK_REQUESTED` state. The DAO will verify:
+- This is a new contract, not a copy of a live mainnet deployment
+- Bounty terms are reasonable
+- Scope is clearly defined
+
+Poll for approval:
+
+```bash
+just check-state
+```
+
+| Output | Meaning |
+|--------|---------|
+| `2` | `ATTACK_REQUESTED` — waiting for DAO |
+| `3` | `UNDER_ATTACK` — approved, vault is open |
+
+> **Note:** Approval on testnet typically happens within a few hours. Reach out in [Discord](https://discord.gg/cyfrin) if you're waiting.
+
+Once you see `3`, your vault is live and attackable. Head to [Execute Your First Attack](/battlechain/quickstart/execute-first-attack) to see what happens next.
+
+---
+
+## What You Just Accomplished
+
+You deployed a contract, created a Safe Harbor agreement, and opened it to whitehat attack — all on a testnet built for exactly this workflow.
+
+This matters beyond BattleChain. Safe Harbor agreements protect protocols and whitehats on mainnet too. Every production contract holding real funds benefits from a clear agreement that defines scope, bounties, and recovery rules *before* something goes wrong. The process you just walked through is the same one you'd follow to protect a live deployment.
+
+You now know how to:
+
+- Deploy contracts to a custom chain with Foundry
+- Import keys securely using `cast wallet import` (no plaintext private keys)
+- Create and configure a Safe Harbor agreement on-chain
+- Register contracts for coordinated security testing
+
+> **Check:** You've deployed your first contract to BattleChain and set up a Safe Harbor agreement. These are skills you'll use on mainnet — not just here.
+
+### Execute Your First Attack
+
+*Exploit the CEI violation in a live BattleChain vault, collect your bounty, and walk away clean under Safe Harbor.*
+
+⚔️
+  
+    You are the Whitehat
+    The vault is live. The DAO approved it. You know exactly what's wrong with it.
+    You spotted a CEI violation and you have a contract that exploits it. The Safe Harbor agreement is in place — what you're about to do is legal, structured, and profitable.
+  
+
+## Prerequisites
+
+You'll need [Foundry](https://book.getfoundry.sh/getting-started/installation) and [just](https://just.systems) installed, and the starter repo cloned:
+
+```bash
+git clone https://github.com/Cyfrin/battlechain-starter
+cd battlechain-starter
+forge install
+```
+
+If you haven't already, import your key into Foundry's encrypted keystore:
+
+```bash
+cast wallet import battlechain --interactive
+```
+
+You'll also need a `VAULT_ADDRESS` and `TOKEN_ADDRESS` to target. If you're attacking your own vault from [Deploy Your First Contract](/battlechain/quickstart/deploy-first-contract), those are already in your `.env`. If you're targeting someone else's vault, get those addresses from them or by querying the `AttackRegistry`.
+
+Your `.env` should have:
+
+```bash
+SENDER_ADDRESS=0x...your_wallet_address...
+TOKEN_ADDRESS=0x...
+VAULT_ADDRESS=0x...
+RECOVERY_ADDRESS=0x...
+```
+
+No private key — your keystore handles signing when prompted.
+
+---
+
+## Verify the Vault is Attackable
+
+Before doing anything, confirm the vault is in `UNDER_ATTACK` state:
+
+```bash
+just check-state
+```
+
+You need to see `3`. If you see `2`, the DAO hasn't approved yet. Anything else and the vault isn't eligible.
+
+---
+
+## Understand the Exploit
+
+Open `src/Attacker.sol`. The attack exploits two things working together: the CEI violation in `VulnerableVault` and the hook system in `MockToken`.
+
+**MockToken's hook system:** Any address can register a hook contract via `setTransferHook(address hook)`. When tokens are transferred *to* that address, the token calls `hook.onTokenTransfer()` after the transfer completes.
+
+**The vault's CEI violation:** `withdrawAll()` calls `TOKEN.transfer()` *before* zeroing `balances[msg.sender]`.
+
+Put them together and the reentrancy chain looks like this:
+
+```
+attack()
+└── TOKEN.setTransferHook(address(this))  ← register as our own hook
+└── vault.deposit(seedAmount)             ← establish a balance
+└── vault.withdrawAll()
+    └── TOKEN.transfer(attacker, amount)
+        └── onTokenTransfer()             ← hook fires, balance not yet zeroed
+            └── vault.withdrawAll()
+                └── TOKEN.transfer(attacker, amount)
+                    └── onTokenTransfer() ← still not zeroed
+                        └── ...           ← repeats until vault is empty
+```
+
+Once the vault is drained, the Safe Harbor settlement runs automatically:
+
+```solidity
+uint256 total = TOKEN.balanceOf(address(this));
+uint256 bounty = (total * BOUNTY_BPS) / 10_000; // 10%
+
+TOKEN.transfer(RECOVERY_ADDRESS, total - bounty); // return 90% to protocol
+TOKEN.transfer(OWNER, bounty);                    // keep 10%
+```
+
+You're not stealing. The protocol gets the majority of funds back minus the agreed bounty. Everyone knew the rules when the agreement was signed.
+
+---
+
+## Run the Attack
+
+```bash
+just attack
+```
+
+Watch the output:
+
+```
+Vault balance before: 1000 tokens
+Deploying attacker...
+
+--- Vault drained ---
+Vault before:          1000 tokens
+Vault after:              0 tokens
+Bounty kept:            100 tokens
+Returned to protocol:   900 tokens
+```
+
+> **Check:** You've executed a legal reentrancy exploit on BattleChain. The vault is empty, the protocol has their funds back minus your bounty, and you're protected under Safe Harbor.
+
+---
+
+## Verify the Math
+
+The agreement set a 10% bounty (`BOUNTY_BPS = 1_000`). The vault had 1,000 seeded tokens plus your 100 seed tokens = 1,100 total.
+
+- Bounty: `1,100 × 10% = 110 tokens`
+- Returned: `1,100 - 110 = 990 tokens`
+
+If the numbers don't look right, check that `RECOVERY_ADDRESS` in your `.env` matches the address in the agreement — that's where the returned funds go.
+
+---
+
+## What Happens on the Protocol Side
+
+The protocol sees their recovery address receive 900 tokens. They now know their vault has a reentrancy vulnerability. If the same code were deployed on mainnet with real TVL, the loss would have been real.
+
+That's the whole point. See [Deploy Your First Contract](/battlechain/quickstart/deploy-first-contract) if you want to experience the other side of this.
+
+### Review Your First Request
+
+*Evaluate an attack mode request as a DAO member — check for mainnet copycats, verify terms, and approve or reject.*
+
+⚖️
+  
+    You are the DAO
+    A protocol wants to open their contracts for attack. You decide if they're allowed to.
+    Your job is to prevent abuse — mainly ensuring no one copies a live mainnet protocol onto BattleChain to have it "attacked" and drained under Safe Harbor cover.
+  
+
+> **Note:** **Prerequisites**: You must be the registry moderator or part of the DAO multisig to approve or reject requests.
+
+---
+
+## Find Pending Requests
+
+Watch for `AgreementStateChanged` events where `newState = 2` (`ATTACK_REQUESTED`), or query directly:
+
+```bash
+cast call 0x9E62988ccA776ff6613Fa68D34c9AB5431Ce57e1 \
+  "getAgreementState(address)(uint8)" \
+  $AGREEMENT_ADDRESS \
+  --rpc-url https://testnet.battlechain.com:3051
+```
+
+| Value | State |
+|-------|-------|
+| `2` | `ATTACK_REQUESTED` — needs your review |
+| `3` | `UNDER_ATTACK` — already approved |
+
+---
+
+## Get the Agreement Details
+
+Pull the full agreement to review scope and terms:
+
+```solidity
+IAgreement agreement = IAgreement(agreementAddress);
+AgreementDetails memory details = agreement.getDetails();
+
+string memory protocolName = details.protocolName;
+BountyTerms memory terms = details.bountyTerms;
+// terms.bountyPercentage, terms.bountyCapUsd, terms.retainable ...
+```
+
+Check which contracts are in scope and how they were deployed:
+
+```solidity
+address[] memory contracts = agreement.getBattleChainScopeAddresses();
+
+for (uint i = 0; i < contracts.length; i++) {
+    address deployer = attackRegistry.getContractDeployer(contracts[i]);
+    // address(0) = NOT deployed via BattleChainDeployer — extra scrutiny required
+}
+```
+
+---
+
+## Review Checklist
+
+  
+    - Was it deployed via `BattleChainDeployer`? (On-chain proof of origin)
+    - Does the protocol have a web presence, social accounts, or audit reports?
+    - Are the contact details real and monitored?
+  
+
+  
+    **This is the most important check.**
+
+    - Compare bytecode to known mainnet contracts
+    - Search for the protocol name on other chains
+    - Check if the same contracts exist elsewhere with live TVL
+
+    A bad actor copying a live protocol onto BattleChain could drain it under Safe Harbor cover and pocket the "bounty" from their own funds. This is the attack vector you're guarding against.
+  
+
+  
+    - Bounty percentage in the normal range (5–15%)?
+    - Cap appropriate for the expected TVL?
+    - Identity requirements clearly stated?
+  
+
+  
+    - All relevant contracts included?
+    - Child contract scope set appropriately?
+    - Recovery address is a secure multisig, not an EOA?
+  
+
+---
+
+## Make Your Decision
+
+### Approve
+
+```bash
+cast send 0x9E62988ccA776ff6613Fa68D34c9AB5431Ce57e1 \
+  "approveAttack(address)" \
+  $AGREEMENT_ADDRESS \
+  --rpc-url https://testnet.battlechain.com:3051 \
+  --account battlechain
+```
+
+This moves the agreement to `UNDER_ATTACK`, enables Safe Harbor protection, and opens the contracts to whitehats.
+
+### Reject
+
+```bash
+cast send 0x9E62988ccA776ff6613Fa68D34c9AB5431Ce57e1 \
+  "rejectAttackRequest(address)" \
+  $AGREEMENT_ADDRESS \
+  --rpc-url https://testnet.battlechain.com:3051 \
+  --account battlechain
+```
+
+This returns the agreement to `NOT_DEPLOYED`. The protocol can fix whatever was wrong and resubmit.
+
+---
+
+## Red Flags
+
+> **Warning:** Reject or investigate further if you see:
+> 
+> - **Bytecode matches a known mainnet contract**
+> - **Protocol name mimics a live protocol**
+> - **No verifiable contact information**
+> - **Bounty percentage above 25%**
+> - **Non-BattleChainDeployer submission with no explanation**
+
+---
+
+## What's Next
+
+  - [Instant Promotion](/battlechain/how-to/instant-promotion): Emergency promotion for situations where a copycat is suspected post-approval
+  - [Governance Parameters](/battlechain/reference/governance-parameters): The parameters you control as a DAO member
+
+### Configure Your AI Tools
+
+*Add BattleChain context to your AI coding tools so they deploy to BattleChain and set up Safe Harbor by default*
+
+## Why This Matters
+
+AI coding agents write your deploy scripts, scaffold your tests, and set up infrastructure. If they don't know about BattleChain, they'll deploy straight to mainnet — skipping the battle-testing step entirely.
+
+Adding a short instruction block to your project tells every AI tool to:
+
+- Deploy contracts to BattleChain first, not mainnet directly
+- Create a Safe Harbor agreement as part of project setup
+- Follow the full BattleChain workflow before promoting to production
+
+## The Prompt
+
+Add the following to your AI tool's configuration file. It works with any tool that reads project-level instructions:
+
+```markdown
+## BattleChain
+
+This project deploys to BattleChain for security battle-testing before mainnet.
+BattleChain is a pre-mainnet L2 where whitehats legally attack contracts under
+Safe Harbor protection.
+
+Full documentation: https://docs.battlechain.com/llms-full.txt
+
+### Deployment workflow
+
+1. Deploy contracts to BattleChain Testnet via BattleChainDeployer
+   (Chain ID: 627, RPC: https://testnet.battlechain.com:3051)
+2. Create a Safe Harbor agreement with bounty terms and contract scope
+3. Request attack mode for DAO approval
+4. After battle-testing, promote to production
+5. Deploy to mainnet
+
+### Requirements
+
+- All deploy scripts must target BattleChain first — never deploy directly to mainnet
+- Create a Safe Harbor agreement as part of initial project setup
+- Use BattleChainDeployer for all deployments (automatic AttackRegistry registration)
+- Read the BattleChain documentation before writing deploy or agreement scripts
+```
+
+## Where to Add It
+
+Each AI tool reads instructions from a different file. Add the prompt above to whichever tools your team uses:
+
+### Claude Code
+
+Add to `CLAUDE.md` in your project root. Claude Code loads this file automatically at the start of every session.
+
+```bash
+# Create or append to CLAUDE.md
+cat >> CLAUDE.md << 'EOF'
+
+## BattleChain
+...
+EOF
+```
+
+### Cursor
+
+Add to `.cursor/rules/battlechain.mdc` in your project root. Cursor loads all `.mdc` files from this directory as project rules.
+
+```bash
+mkdir -p .cursor/rules
+# Create .cursor/rules/battlechain.mdc with the prompt above
+```
+
+### GitHub Copilot
+
+Add to `.github/copilot-instructions.md`. Copilot reads this file for Chat, code review, and the coding agent.
+
+```bash
+mkdir -p .github
+# Append to .github/copilot-instructions.md
+```
+
+### OpenAI Codex
+
+Add to `AGENTS.md` in your project root. Codex CLI loads this file as project-level instructions.
+
+```bash
+# Create or append to AGENTS.md
+```
+
+### Windsurf
+
+Add to `.windsurfrules` in your project root.
+
+```bash
+# Create or append to .windsurfrules
+```
+
+### OpenClaw
+
+Add to your OpenClaw skill configuration or system prompt. Point it at the docs URL so it can fetch full context:
+
+```
+https://docs.battlechain.com/llms-full.txt
+```
+
+### Other Tools
+
+The same prompt works with any AI tool that reads project-level instruction files. Common patterns:
+
+| Tool | File |
+|------|------|
+| Claude Code | `CLAUDE.md` |
+| Cursor | `.cursor/rules/*.mdc` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| OpenAI Codex | `AGENTS.md` |
+| Windsurf | `.windsurfrules` |
+| Gemini | `GEMINI.md` |
+| JetBrains Junie | `.junie/guidelines.md` |
+| Aider | `.aider.conf.yml` |
+
+> **Tip:** The docs URL `https://docs.battlechain.com/llms-full.txt` is the key piece. Any AI that can fetch a URL will get the full BattleChain documentation in one request (~100 KB, fits in most context windows).
+
+---
+
+## Tutorials
+
+### Going Attackable: End-to-End Protocol Tutorial
+
+*A complete tutorial for protocols to deploy, configure, and enter attack mode on BattleChain*
+
+This tutorial covers the full journey of taking your protocol from deployment to attack mode on BattleChain. You'll learn not just the mechanics, but *why* each step matters for your security.
+
+> **Note:** **Audience**: Protocol teams and developers preparing contracts for BattleChain.
+> 
+> **Prerequisites**: An audited smart contract and test funds for liquidity.
+
+## Why Go Attackable?
+
+Traditional security audits review code statically. BattleChain adds a dynamic layer: real attackers with real economic incentives trying to break your contracts. This means:
+
+- **Exploits get found before mainnet** — whitehats are motivated by bounties, not just reports
+- **You control the risk** — set your own bounty terms and liquidity levels
+- **Legal protection works both ways** — Safe Harbor protects whitehats, and you set the rules
+
+## Part 1: Deploy Your Contracts
+
+Deploy through `BattleChainDeployer` so your contracts are automatically registered with the `AttackRegistry`.
+
+```solidity
+BattleChainDeployer deployer = BattleChainDeployer(BATTLECHAIN_DEPLOYER_ADDRESS);
+
+bytes memory bytecode = type(MyVault).creationCode;
+bytes32 salt = keccak256("my-vault-v1");
+
+address myVault = deployer.deployCreate2(salt, bytecode);
+```
+
+> **Tip:** Deploy the **exact same bytecode** you'll use on mainnet. Only change constructor parameters like oracle addresses or chain-specific config. Testing different code defeats the purpose.
+
+See the [deploying contracts tutorial](/battlechain/tutorials/deploying-contracts) for details on deployment methods.
+
+## Part 2: Create Your Safe Harbor Agreement
+
+The agreement defines the rules of engagement for whitehats. Think carefully about these terms — they determine who attacks your contracts and how.
+
+### Contact Details
+
+Provide real, monitored contacts. Whitehats may need to reach you during an active exploit:
+
+```solidity
+Contact[] memory contacts = new Contact[](1);
+contacts[0] = Contact({
+    name: "Security Team",
+    contact: "security@myprotocol.com"
+});
+```
+
+### Define Scope
+
+List every contract whitehats can target. Use `ChildContractScope.All` if your contracts create child contracts:
+
+```solidity
+Account[] memory accounts = new Account[](1);
+accounts[0] = Account({
+    accountAddress: "0x1234...your-vault",
+    childContractScope: ChildContractScope.All
+});
+
+Chain[] memory chains = new Chain[](1);
+chains[0] = Chain({
+    caip2ChainId: "eip155:627",
+    assetRecoveryAddress: "0xYourRecoveryMultisig",
+    accounts: accounts
+});
+```
+
+### Set Bounty Terms
+
+Choose terms that attract skilled whitehats:
+
+```solidity
+BountyTerms memory bountyTerms = BountyTerms({
+    bountyPercentage: 10,
+    bountyCapUsd: 5_000_000,
+    retainable: true,
+    identity: IdentityRequirements.Anonymous,
+    diligenceRequirements: "",
+    aggregateBountyCapUsd: 0
+});
+```
+
+| Decision | Recommended | Why |
+|----------|-------------|-----|
+| Bounty % | 10% | Industry standard, attracts serious researchers |
+| Cap | \$1M - \$5M | High enough to motivate deep analysis |
+| Retainable | `true` | Simpler for whitehats — they keep bounty from recovered funds |
+| Identity | `Anonymous` | Maximizes participation |
+
+### Create and Configure
+
+```solidity
+AgreementDetails memory details = AgreementDetails({
+    protocolName: "My Protocol",
+    contactDetails: contacts,
+    chains: chains,
+    bountyTerms: bountyTerms,
+    agreementURI: "ipfs://QmYourAgreementDocument"
+});
+
+address agreement = agreementFactory.create(details, msg.sender, salt);
+
+// Commit to terms for at least 30 days
+IAgreement(agreement).extendCommitmentWindow(block.timestamp + 30 days);
+
+// Link your protocol to the agreement
+safeHarborRegistry.adoptSafeHarbor(agreement);
+```
+
+For the full configuration reference, see [How to Create a Safe Harbor Agreement](/battlechain/how-to/create-agreement).
+
+## Part 3: Request Attack Mode
+
+```solidity
+attackRegistry.requestUnderAttack(agreement);
+```
+
+Your contracts are now in `ATTACK_REQUESTED` state. The DAO will review and check:
+- Is this a new contract (not a mainnet copy)?
+- Are the bounty terms reasonable?
+- Is the scope clearly defined?
+
+See [How to Request Attack Mode](/battlechain/how-to/request-attack-mode) for details and troubleshooting.
+
+## Part 4: During the Attack Period
+
+Once the DAO approves, your contracts enter `UNDER_ATTACK` state. Here's what to expect:
+
+### Monitor Activity
+
+Watch for unusual transactions on your contracts. Whitehats may:
+- Drain liquidity pools
+- Exploit reentrancy or flash loan vectors
+- Test access control boundaries
+
+### If a Vulnerability is Found
+
+1. Whitehats extract funds and send the remainder to your recovery address
+2. You keep your assets minus the bounty
+3. Consider whether the vulnerability affects your mainnet plans
+
+### When You're Confident
+
+After sufficient testing (see [best practices for timing](/battlechain/explanation/best-practices)), promote to production:
+
+```solidity
+attackRegistry.promote(agreement);
+// 3-day countdown begins — contracts are still attackable
+// After 3 days, contracts enter PRODUCTION
+```
+
+See [How to Promote to Production](/battlechain/how-to/promote-to-production) for the full promotion flow.
+
+## Summary
+
+| Step | Action | Result |
+|------|--------|--------|
+| 1 | Deploy via BattleChainDeployer | Contracts registered |
+| 2 | Create Safe Harbor agreement | Terms defined |
+| 3 | Request attack mode | DAO reviews |
+| 4 | DAO approves | Whitehats can attack |
+| 5 | Promote to production | Battle-tested and ready for mainnet |
+
+### Deploying Contracts to BattleChain
+
+*Learn how to deploy smart contracts using BattleChainDeployer and understand deployment options*
+
+This tutorial teaches you how to deploy contracts to BattleChain and why the deployment method matters for the attack mode workflow.
+
+> **Note:** **Audience**: Developers deploying contracts to BattleChain.
+> 
+> **Prerequisites**: Familiarity with Solidity and smart contract deployment.
+
+## Why BattleChainDeployer?
+
+BattleChain tracks which contracts are eligible for attack mode through the `AttackRegistry`. When you deploy via `BattleChainDeployer`, your contracts are **automatically registered**, which means:
+
+- You're recorded as the deployer on-chain
+- You can request attack mode without extra authorization steps
+- The DAO has on-chain proof of deployment origin
+
+Without BattleChainDeployer, you can still enter attack mode, but the process requires more DAO scrutiny.
+
+## Deployment Methods
+
+`BattleChainDeployer` wraps [CreateX](https://github.com/pcaversaccio/createx), giving you access to all standard deployment patterns:
+
+### CREATE (Simple Deployment)
+
+```solidity
+BattleChainDeployer deployer = BattleChainDeployer(BATTLECHAIN_DEPLOYER_ADDRESS);
+
+// Simple deployment
+bytes memory bytecode = type(MyContract).creationCode;
+address deployed = deployer.deployCreate(bytecode);
+```
+
+### CREATE2 (Deterministic Address)
+
+```solidity
+// Deterministic address based on salt + bytecode
+bytes32 salt = keccak256("my-contract-v1");
+bytes memory bytecode = type(MyContract).creationCode;
+
+address deployed = deployer.deployCreate2(salt, bytecode);
+```
+
+> **Tip:** Use CREATE2 when you need the same contract address across BattleChain and mainnet.
+
+### CREATE2 with Initialization
+
+```solidity
+// Deploy and initialize in one transaction
+bytes memory bytecode = type(MyProxy).creationCode;
+bytes memory initData = abi.encodeCall(MyProxy.initialize, (owner, config));
+
+address deployed = deployer.deployCreate2AndInit(
+    salt,
+    bytecode,
+    initData
+);
+```
+
+### CREATE3 (Address Independent of Bytecode)
+
+```solidity
+// Address depends only on salt, not bytecode
+bytes32 salt = keccak256("my-contract-v1");
+bytes memory bytecode = type(MyContract).creationCode;
+
+address deployed = deployer.deployCreate3(salt, bytecode);
+```
+
+### Clone Deployment
+
+```solidity
+// Deploy a minimal proxy (EIP-1167 clone)
+address implementation = 0x1234...;
+address clone = deployer.deployCreate2Clone(salt, implementation);
+```
+
+## All Available Methods
+
+| Method | Address Determinism | Notes |
+|--------|-------------------|-------|
+| `deployCreate()` | Nonce-based | Simplest option |
+| `deployCreateAndInit()` | Nonce-based | Deploys + calls init |
+| `deployCreateClone()` | Nonce-based | EIP-1167 proxy |
+| `deployCreate2()` | Salt + bytecode | Same address cross-chain |
+| `deployCreate2AndInit()` | Salt + bytecode | Deploy + init |
+| `deployCreate2Clone()` | Salt + impl | Deterministic proxy |
+| `deployCreate3()` | Salt only | Address independent of code |
+| `deployCreate3AndInit()` | Salt only | Deploy + init |
+
+## What Happens After Deployment
+
+Every deployment through BattleChainDeployer automatically calls `AttackRegistry.registerDeployment()`, which:
+
+1. Records the contract address
+2. Sets its state to `NEW_DEPLOYMENT`
+3. Records you as the deployer
+4. Authorizes you as the agreement owner for that contract
+
+```solidity
+// You can verify registration
+address deployer = attackRegistry.getContractDeployer(myContract);
+// deployer == your address
+
+IAttackRegistry.ContractState state = attackRegistry.getAgreementState(myContract);
+// state == NEW_DEPLOYMENT (1)
+```
+
+## Deploying Without BattleChainDeployer
+
+If your contracts are already deployed (e.g., through a custom factory or script), you can still enter the attack flow:
+
+1. Create your Safe Harbor agreement as normal
+2. Use `requestUnderAttackByNonAuthorized()` instead of `requestUnderAttack()`
+
+```solidity
+attackRegistry.requestUnderAttackByNonAuthorized(agreementAddress);
+```
+
+> **Warning:** Non-BattleChainDeployer contracts face extra DAO scrutiny because there's no on-chain proof of deployment origin. The DAO may take longer to approve or may request additional information.
+
+## Next Steps
+
+  - [Going Attackable](/battlechain/tutorials/going-attackable): Full end-to-end protocol tutorial
+  - [Contract API Reference](/battlechain/reference/contracts): Complete BattleChainDeployer API
+
+### Attacking Contracts: Whitehat Tutorial
+
+*A complete tutorial for whitehats on finding, attacking, and earning bounties on BattleChain*
+
+This tutorial teaches you the full whitehat workflow on BattleChain — from finding targets to earning bounties — and explains the legal protections that make it possible.
+
+> **Note:** **Audience**: Security researchers and whitehats.
+> 
+> **Prerequisites**: Familiarity with smart contract security, Solidity, and common vulnerability patterns.
+
+## Why BattleChain for Whitehats?
+
+Traditional bug bounties ask you to *report* vulnerabilities. BattleChain lets you *exploit* them:
+
+- **Legal protection**: Safe Harbor agreements protect you from prosecution
+- **Immediate reward**: Keep your bounty from recovered funds (if retainable)
+- **No coordination required**: Attack first, no need for prior disclosure
+- **Real exploits**: Test against contracts with real liquidity, not toy examples
+
+## Understanding Safe Harbor
+
+Before attacking, understand what protects you. When a protocol enters attack mode:
+
+1. They've adopted a **Safe Harbor agreement** committing to not pursue legal action
+2. Their contracts are in `UNDER_ATTACK` or `PROMOTION_REQUESTED` state
+3. You're protected as long as you:
+   - Attack in-scope contracts only
+   - Keep only your bounty entitlement
+   - Meet any identity requirements
+
+Read the full [Safe Harbor explanation](/battlechain/explanation/safe-harbor) for details on what is and isn't protected.
+
+## Step 1: Find Targets
+
+### Check a Specific Contract
+
+```solidity
+bool attackable = attackRegistry.isTopLevelContractUnderAttack(targetContract);
+```
+
+### Monitor for New Targets
+
+Watch for `AgreementStateChanged` events:
+
+```solidity
+event AgreementStateChanged(address indexed agreementAddress, ContractState newState);
+// newState = 3 (UNDER_ATTACK) → newly attackable
+// newState = 4 (PROMOTION_REQUESTED) → still attackable, 3-day countdown
+```
+
+See [How to Find Attackable Contracts](/battlechain/how-to/find-attackable-contracts) for advanced querying techniques.
+
+## Step 2: Evaluate the Target
+
+Before investing time in finding exploits, evaluate the opportunity:
+
+```solidity
+address agreementAddr = attackRegistry.getAgreementForContract(targetContract);
+IAgreement agreement = IAgreement(agreementAddr);
+
+// Get bounty terms
+BountyTerms memory terms = agreement.getBountyTerms();
+uint256 bountyPercent = terms.bountyPercentage;
+uint256 bountyCap = terms.bountyCapUsd;
+bool canRetain = terms.retainable;
+```
+
+### Checklist Before Attacking
+
+  
+    ```solidity
+    bool valid = safeHarborRegistry.isAgreementValid(agreementAddr);
+    ```
+    Only attack contracts with valid agreements from the official factory.
+  
+
+  
+    ```solidity
+    bool inScope = agreement.isContractInScope(targetContract);
+    ```
+    Attacking out-of-scope contracts voids your Safe Harbor protection.
+  
+
+  
+    Check the percentage, cap, retainability, and identity requirements. Make sure the economics work for your effort level.
+  
+
+  
+    ```solidity
+    uint256 cantChangeUntil = agreement.getCantChangeUntil();
+    ```
+    Ensure terms can't change unfavorably before you finish your attack.
+  
+
+## Step 3: Execute Your Attack
+
+There are no restrictions on exploitation methods for in-scope contracts. Common approaches:
+
+- Reentrancy attacks
+- Flash loan exploits
+- Oracle manipulation
+- Access control bypasses
+- Logic errors in state transitions
+
+```solidity
+contract Attacker {
+    function attack(address target) external {
+        // Your exploit logic
+        IVulnerable(target).vulnerableFunction();
+    }
+}
+```
+
+## Step 4: Handle Funds Correctly
+
+This is critical. Mishandling funds can void your Safe Harbor protection.
+
+### If Retainable = true
+
+Calculate your bounty and send the rest to the recovery address:
+
+```solidity
+uint256 recovered = address(this).balance;
+uint256 bounty = (recovered * bountyPercent) / 100;
+
+// Respect the cap
+// Note: Convert bountyCapUsd to token amount using current prices
+
+// Send remainder to recovery
+payable(recoveryAddress).transfer(recovered - bounty);
+// Keep your bounty
+```
+
+### If Retainable = false
+
+Send **everything** to the recovery address. The protocol pays your bounty separately:
+
+```solidity
+payable(recoveryAddress).transfer(address(this).balance);
+```
+
+### Get the Recovery Address
+
+```solidity
+string memory recoveryStr = agreement.getAssetRecoveryAddress("eip155:627");
+```
+
+See [How to Claim Bounties](/battlechain/how-to/claim-bounties) for detailed calculation examples.
+
+## Step 5: Document Everything
+
+Keep records of:
+- Target contract and agreement addresses
+- The vulnerability exploited
+- All transaction hashes
+- Your bounty calculation (show your work)
+- Funds sent to recovery address
+
+This protects you if there's ever a dispute about your compliance with the agreement terms.
+
+## Important: Mainnet Implications
+
+> **Warning:** If the vulnerability you found also exists on mainnet:
+> 
+> - **Do NOT publicly disclose** the vulnerability
+> - **Contact the protocol** through their security contacts
+> - **Consider traditional bug bounty** for the mainnet instance
+> - Using a BattleChain exploit on mainnet is NOT protected by Safe Harbor
+
+## Summary
+
+| Step | Action | Why |
+|------|--------|-----|
+| 1 | Find attackable contracts | Query AttackRegistry |
+| 2 | Verify agreement and terms | Ensure legal protection |
+| 3 | Execute exploit | No restrictions on method |
+| 4 | Handle funds correctly | Keep bounty, send rest to recovery |
+| 5 | Document everything | Protect yourself in disputes |
+
+## Next Steps
+
+  - [Execute Your First Attack](/battlechain/quickstart/execute-first-attack): Quick-start guide with code examples
+  - [Bounty Terms Reference](/battlechain/reference/bounty-terms): Understand all bounty configuration options
+
+### Approving Requests: DAO Member Tutorial
+
+*A complete tutorial for DAO members on reviewing, approving, and managing attack requests*
+
+This tutorial teaches DAO members how to evaluate attack mode requests, make approval decisions, and handle edge cases like copycats and emergencies.
+
+> **Note:** **Audience**: AttackRegistry DAO members and registry moderators.
+> 
+> **Prerequisites**: You must be the registry moderator or part of the DAO multisig.
+
+## Your Role
+
+As a DAO member, you are the gatekeeper for BattleChain's attack mode. Your primary responsibilities:
+
+1. **Approve legitimate requests** — let real protocols stress-test their contracts
+2. **Reject copycats** — prevent mainnet contracts from being copied and exploited
+3. **Handle emergencies** — use instant promotion when needed
+4. **Act promptly** — if you don't act within 14 days, requests auto-promote to production
+
+## Understanding the Review Flow
+
+When a protocol requests attack mode, the agreement state changes to `ATTACK_REQUESTED`. You have three options:
+
+| Action | Effect | When to Use |
+|--------|--------|-------------|
+| `approveAttack()` | → `UNDER_ATTACK` | Request passes all checks |
+| `rejectAttackRequest()` | → `NOT_DEPLOYED` | Red flags found |
+| `instantPromote()` | → `PRODUCTION` | Emergency (skip attack phase) |
+| Do nothing | → `PRODUCTION` after 14 days | **Avoid this** — always act |
+
+## Step 1: Monitor for Requests
+
+Watch for `AgreementStateChanged` events:
+
+```solidity
+event AgreementStateChanged(address indexed agreementAddress, ContractState newState);
+// newState = 2 (ATTACK_REQUESTED) → needs your review
+```
+
+Or query pending requests:
+
+```solidity
+IAttackRegistry.ContractState state = attackRegistry.getAgreementState(agreementAddress);
+if (state == IAttackRegistry.ContractState.ATTACK_REQUESTED) {
+    // Needs review
+}
+```
+
+## Step 2: Gather Information
+
+```solidity
+IAgreement agreement = IAgreement(agreementAddress);
+AgreementDetails memory details = agreement.getDetails();
+
+// Protocol info
+string memory name = details.protocolName;
+Contact[] memory contacts = details.contactDetails;
+
+// Bounty terms
+BountyTerms memory terms = details.bountyTerms;
+
+// Contracts in scope
+address[] memory contracts = agreement.getBattleChainScopeAddresses();
+```
+
+Check deployment method for each contract:
+
+```solidity
+for (uint i = 0; i < contracts.length; i++) {
+    address deployer = attackRegistry.getContractDeployer(contracts[i]);
+    if (deployer == address(0)) {
+        // NOT via BattleChainDeployer — extra scrutiny needed
+    }
+}
+```
+
+## Step 3: The Review Checklist
+
+This is the most important part of your role. Go through each check carefully.
+
+### Check 1: Is This a Mainnet Copycat?
+
+**This is the single most important check.** A copycat is someone who deploys a copy of a mainnet contract on BattleChain to exploit it without consequences.
+
+- Compare bytecode to known mainnet contracts
+- Search for the protocol name on other chains
+- Check if identical contracts exist elsewhere with TVL
+- Look for suspiciously generic protocol names
+
+> **Warning:** If you approve a copycat, whitehats may find vulnerabilities that get exploited on mainnet. This damages the entire ecosystem's trust in BattleChain.
+
+### Check 2: Is This a Legitimate Protocol?
+
+- Does the protocol have a web presence?
+- Are there social accounts, a team, audit reports?
+- Are the contact details real and responsive?
+- Was it deployed via BattleChainDeployer?
+
+### Check 3: Are Bounty Terms Reasonable?
+
+- Bounty percentage in normal range (5-15%)?
+- Cap appropriate for expected TVL?
+- Identity requirements clearly defined?
+- If `Named`, are diligence requirements specified?
+
+### Check 4: Is the Scope Clear?
+
+- All relevant contracts included?
+- Child contract scope makes sense?
+- Recovery address is a multisig (not an EOA)?
+
+## Step 4: Make Your Decision
+
+### Approve
+
+```solidity
+attackRegistry.approveAttack(agreementAddress);
+```
+
+### Reject
+
+```solidity
+attackRegistry.rejectAttackRequest(agreementAddress);
+```
+
+The protocol can fix issues and resubmit. Rejection is not permanent.
+
+> **Tip:** When in doubt, **reject**. The protocol can always resubmit. Approving a bad actor is much harder to undo.
+
+## Handling Emergencies
+
+### Instant Promotion
+
+Use `instantPromote()` for genuine emergencies only:
+
+```solidity
+attackRegistry.instantPromote(agreementAddress);
+```
+
+Valid scenarios:
+- **Copycat discovered** after approval
+- **TVL surge** creating unreasonable risk
+- **Protocol emergency** — critical issue found
+
+See [How to Use Instant Promotion](/battlechain/how-to/instant-promotion) for the full process.
+
+## Best Practices
+
+- **Act within days, not weeks** — the 14-day auto-promote is a safety net, not a target
+- **Reject to buy time** — if you need more time, reject and let the protocol resubmit
+- **Document every decision** — record what you checked and why you decided
+- **Use instant promotion sparingly** — it's an emergency power, not a convenience feature
+- **Coordinate with other DAO members** — discuss borderline cases before acting
+
+See [Best Practices for the DAO](/battlechain/explanation/best-practices) for more guidelines.
+
+## Next Steps
+
+  - [Review Your First Request](/battlechain/quickstart/review-first-request): Quick-start walkthrough with code
+  - [Governance Parameters](/battlechain/reference/governance-parameters): All parameters you control
+
+### Prediction Market
+
+*Bet on the outcome of BattleChain attack periods*
+
+## Coming Soon
+
+The BattleChain Prediction Market will allow participants to bet on the outcomes of attack periods. Will a protocol survive unscathed, or will whitehats find vulnerabilities?
+
+> **Note:** This feature is under development. Check back for updates.
+
+## Planned Features
+
+- **Bet on attack outcomes**: Will this protocol get exploited during its attack period?
+- **Market-driven security signals**: Market prices reflect collective confidence in a protocol's security
+- **Incentive alignment**: Creates additional economic incentives for thorough security research
+
+## How It Will Work
+
+1. A protocol enters attack mode
+2. A prediction market opens for that protocol's attack period
+3. Participants bet on whether the protocol will be exploited
+4. Markets resolve when the protocol promotes to production or is marked corrupted
+
+## Stay Updated
+
+Join the community for announcements:
+
+  - [Discord](https://discord.gg/cyfrin): Join the Cyfrin Discord for updates
+  - [GitHub](https://github.com/Cyfrin/battlechain-safe-harbor): Follow the BattleChain repository
+
+---
+
+## How-to Guides
+
+### How to Use AI with BattleChain Docs
+
+*Give your AI agent full context on BattleChain by pointing it at our machine-readable docs*
+
+## Overview
+
+BattleChain publishes machine-readable versions of these docs so AI agents can ingest them directly:
+
+| File | Contents | Size |
+|------|----------|------|
+| [`/llms.txt`](/llms.txt) | Table of contents with page titles, descriptions, and links | ~4 KB |
+| [`/llms-full.txt`](/llms-full.txt) | Complete text of every page as clean markdown | ~100 KB |
+
+Both files follow the [llms.txt](https://llmstxt.org/) convention and are regenerated on every deploy.
+
+## Open in Your AI
+
+Start a conversation with full BattleChain docs loaded as context:
+
+  
+    
+    Open in Claude
+  
+  
+    
+    Open in ChatGPT
+  
+
+Or paste this prompt into any AI:
+
+```
+Read https://docs.battlechain.com/llms-full.txt and use it to answer my questions about BattleChain.
+```
+
+## Cursor
+
+Add BattleChain as a doc source so Cursor indexes it automatically. Go to **Cursor Settings → Features → Docs**, click **Add**, and enter:
+
+```
+https://docs.battlechain.com/llms-full.txt
+```
+
+Once indexed, Cursor's AI will have full BattleChain context when you reference `@docs` in chat.
+
+## Custom Agents
+
+If you're building an agent that interacts with BattleChain, fetch the docs at startup and include them as context:
+
+- **Full context** — fetch `/llms-full.txt` and add it to the system prompt (~100 KB, fits in most context windows)
+- **Selective context** — fetch `/llms.txt` to build a page index, then retrieve individual pages on demand for RAG pipelines
+
+```python
+import httpx
+
+docs = httpx.get("https://docs.battlechain.com/llms-full.txt").text
+
+messages = [
+    {"role": "system", "content": f"BattleChain documentation:\n\n{docs}"},
+    {"role": "user", "content": user_question},
+]
+```
+
+### How to Add BattleChain to MetaMask
+
+*Connect your wallet to the BattleChain network*
+
+## Overview
+
+To interact with contracts on BattleChain, you need to add the network to your wallet. This guide covers MetaMask, but the same details work for any EVM-compatible wallet.
+
+## One-Click Setup
+
+Click the button below to add BattleChain Testnet to MetaMask automatically:
+
+## Manual Setup
+
+If you prefer to add the network manually:
+
+1. Open MetaMask and click the network selector at the top
+2. Click **Add Network** → **Add a network manually**
+3. Enter the following details:
+   - **Network Name**: BattleChain Testnet
+   - **RPC URL**: `https://testnet.battlechain.com:3051`
+   - **Chain ID**: `627`
+   - **Currency Symbol**: `ETH`
+   - **Block Explorer URL**: `https://explorer.testnet.battlechain.com/`
+4. Click **Save**
+
+> **Check:** BattleChain Testnet is now available in your MetaMask network list.
+
+## Mainnet
+
+> **Note:** BattleChain Mainnet details will be announced when the network launches. Check back here for updates.
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Cannot connect to RPC | Ensure the RPC URL is entered exactly as shown above |
+| Wrong chain ID | Remove the network and re-add with Chain ID `627` |
+| Transactions stuck | Try resetting your MetaMask account (Settings → Advanced → Reset Account) |
+
+## Next Steps
+
+  - [Deploy Your First Contract](/battlechain/quickstart/deploy-first-contract): Get started deploying contracts on BattleChain
+  - [Find Attackable Contracts](/battlechain/how-to/find-attackable-contracts): Discover contracts you can legally attack
+
+### Exploring Agreements
+
+*Browse Safe Harbor Agreements, filter by state, and inspect bounty terms and contract coverage*
+
+## Overview
+
+The Agreements page (`/agreements`) is the central place to discover which protocols on BattleChain have Safe Harbor Agreements, what bounty terms they offer, and which contracts are in scope.
+
+## The Agreements Table
+
+The main table lists all agreements with these columns:
+
+| Column | Description |
+|--------|-------------|
+| Protocol Name | The protocol's display name |
+| State | Current [lifecycle state](/battlechain/explanation/contract-lifecycle) with a color-coded badge |
+| Bounty % | Percentage of recovered funds offered to whitehats |
+| Bounty Cap | Maximum bounty in USD (or "No cap") |
+| Created At | When the agreement was registered |
+
+Click any column header to sort ascending or descending.
+
+## Filtering by State
+
+Use the state filter tabs above the table to narrow results:
+
+| Filter | States Shown | Description |
+|--------|-------------|-------------|
+| **All** | Everything | Browse all agreements regardless of state |
+| **Registered** | `NEW_DEPLOYMENT` | Newly created agreements not yet requesting attack mode |
+| **Warming Up** | `ATTACK_REQUESTED` | Agreements awaiting DAO approval for attack mode |
+| **Attackable** | `UNDER_ATTACK` | **Open for ethical hacking — whitehats start here** |
+| **Promotion Pending** | `PROMOTION_REQUESTED` | In a 3-day countdown to production; still attackable |
+| **Production** | `PRODUCTION` | Fully promoted and no longer attackable |
+| **Compromised** | `CORRUPTED` | Exploited during the attack phase |
+
+> **Tip:** Whitehats: filter by **Attackable** to see all contracts currently open for ethical hacking. Contracts in **Promotion Pending** are also still attackable during the 3-day countdown.
+
+## Agreement Details
+
+Click any row to expand it and view the full agreement. The expanded view contains several sections:
+
+### Bounty Terms
+
+- **Bounty Percentage** — what percentage of recovered value the whitehat earns
+- **Bounty Cap (USD)** — maximum per-rescue payout, or "No cap"
+- **Aggregate Bounty Cap (USD)** — maximum total across all rescues, if set
+- **Identity Requirement** — what level of identification is needed to claim the bounty:
+
+| Level | Meaning |
+|-------|---------|
+| Anonymous OK | No identity verification required |
+| Pseudonym Required | A consistent handle or alias is required |
+| ID Required | Full identity verification required |
+
+- **Funds Retainable** — whether the whitehat keeps the bounty from recovered funds directly, or must return everything and receive a separate payout
+
+For full details on bounty configuration, see the [Bounty Terms Reference](/battlechain/reference/bounty-terms).
+
+### Contact Information
+
+Emergency contacts for the protocol's security team — email, Discord, Telegram, Twitter, or other channels. Whitehats should use these for coordinated disclosure.
+
+### Covered Contracts
+
+The list of contract addresses protected by this agreement. Each entry shows its **child contract scope**:
+
+| Scope | Meaning |
+|-------|---------|
+| This contract only | Only the listed address |
+| + existing children | Includes child contracts that existed when the agreement was created |
+| + all children | Includes all child contracts — past and future |
+| + future children | Only child contracts created after the agreement |
+
+### Commitment Window
+
+Shows when the agreement's terms are locked. During a commitment window, the protocol can only make whitehat-favorable changes (increase bounties, loosen identity requirements, add contracts, extend the window). They cannot decrease bounties, remove contracts, or tighten requirements.
+
+### Agreement Document
+
+A link to the full legal agreement document, hosted on IPFS, Arweave, or HTTP. Opens in a new tab.
+
+## Agreements on Contract Pages
+
+When you visit any contract's address page, the explorer shows whether it's covered by a Safe Harbor Agreement:
+
+- **Covered contracts** display an agreement summary with the current state badge, bounty terms, and a link to the full agreement
+- **Uncovered contracts** show a warning banner noting that no Safe Harbor Agreement exists and that default network rescue terms may apply
+
+- [Managing Agreements](/battlechain/how-to/managing-agreements-in-explorer): Next: Create and manage agreements through the explorer UI
+
+### Managing Agreements in the Explorer
+
+*Create, edit, and manage Safe Harbor Agreements and the attack lifecycle through the block explorer UI*
+
+## Overview
+
+The block explorer provides a full UI for managing Safe Harbor Agreements — no CLI or direct contract calls required. You'll need MetaMask to sign transactions.
+
+## Connect Your Wallet
+
+Click **Connect MetaMask** in the top navigation bar. Once connected, the explorer shows your shortened address and enables all management actions on agreements and contracts you own.
+
+> **Note:** Management actions are only visible when you're connected as the agreement owner (or attack moderator, for promotion controls).
+
+## Create a New Agreement
+
+You can create an agreement from two places:
+
+- **The Agreements page** (`/agreements`) — click the **Create** button in the page header
+- **A contract page** — if the contract has no existing agreement, a warning banner appears with a **Create Safe Harbor Agreement** button (visible to the contract owner for BattleChainDeployer contracts, or to anyone for external contracts)
+
+Either path opens the same two-step wizard.
+
+### Step 1: Configure the Agreement
+
+Fill in the following fields:
+
+**Protocol Name** (required) — your protocol's display name.
+
+**Bounty Terms** (required):
+- Bounty Percentage (1–100%)
+- Bounty Cap in USD
+- Identity Requirement — Anonymous, Pseudonymous, or Named
+- Allow Whitehats to Retain Recovered Funds (toggle)
+- Diligence Requirements (only when Named identity is selected)
+- Aggregate Bounty Cap in USD (optional)
+
+**Contact Information** (at least one required):
+- Add contacts by type: Email, Discord, Telegram, Twitter, or Other
+- You can add multiple contacts
+
+**Chain Configuration** (required):
+- Asset Recovery Address — where recovered funds are sent (`0x` format)
+- Covered Contracts — the contract addresses protected by this agreement
+- Child Contract Scope for each covered contract (This only, + Existing children, + All children, + Future children)
+
+**Agreement Document URI** (optional) — link to the full legal document on IPFS, Arweave, or HTTP.
+
+After filling in the form, click **Create Agreement** and approve the transaction in MetaMask. The `AgreementFactory` deploys your agreement contract.
+
+### Step 2: Adopt the Agreement (Optional)
+
+After creation, you can optionally adopt the agreement in the BattleChain Safe Harbor Registry. This links your protocol identity to the agreement on-chain. You can skip this step — the agreement contract is valid either way.
+
+## Edit an Existing Agreement
+
+When viewing an agreement you own, inline edit buttons appear next to each section. You can modify:
+
+- Protocol name
+- Bounty terms (percentage, cap, identity requirement, retainability, aggregate cap)
+- Contact information (add or remove contacts)
+- Covered contracts (add new addresses, mark for removal, change child contract scope)
+- Agreement document URI
+
+> **Warning:** During an active commitment window, you can only make **whitehat-favorable changes**: increase bounties, loosen identity requirements, add contracts, or extend the window. You cannot decrease bounties, remove contracts, or tighten identity requirements until the window expires.
+
+## Request Attackable Mode
+
+From a contract page, click **Request Attackable Mode** to submit the contract for ethical hacking. This opens a three-step modal:
+
+### Step 1: Select an Agreement
+
+Choose one of:
+- **Detected agreements** — the explorer automatically finds agreements that cover this contract
+- **Paste an agreement address** — enter one manually
+- **Create a new agreement** — opens the creation wizard inline
+
+### Step 2: Review and Submit
+
+Review the selected agreement and affected contracts. The explorer checks the commitment window — if it's less than 7 days, you'll need to extend it before proceeding.
+
+To extend, pick a new deadline (must be at least 7 days in the future) and confirm the transaction.
+
+Once the commitment window is valid, submit the request and approve the transaction.
+
+### Step 3: Confirmation
+
+The request is submitted. Your contract moves to **Warming Up** (`ATTACK_REQUESTED`) and awaits DAO approval.
+
+> **Note:** For contracts not deployed via BattleChainDeployer, the request goes through `requestUnderAttackByNonAuthorized()` and requires DAO approval. A note in the UI indicates this.
+
+## Request Promotion to Production
+
+When a contract is in **Attackable** state, the attack moderator can click **Request Promotion to Production**. This starts a 3-day countdown during which the contract remains attackable.
+
+## Cancel Promotion
+
+During the 3-day promotion countdown, the attack moderator can click **Cancel Promotion** to return the contract to **Attackable** immediately.
+
+## Skip to Production
+
+From a contract in **Registered** state, the owner can click **Go to Production** to skip attack mode entirely. A confirmation modal warns that the contract will not be stress-tested by whitehats.
+
+> **Tip:** For details on how agreement states and transitions work, see [The Contract Lifecycle](/battlechain/explanation/contract-lifecycle).
+
+- [Verifying Contracts](/battlechain/how-to/verifying-contracts): Next: Verify your contract source code on the explorer
+
+### Verifying Contracts
+
+*Verify contract source code on the BattleChain block explorer*
+
+## Overview
+
+Verifying a contract publishes its source code on the block explorer so anyone can read, audit, and interact with it. Verified contracts display a checkmark badge and expose a **Contract** tab with the full source, ABI, and constructor arguments.
+
+## Why Verify
+
+- **Transparency** — whitehats and the community can review your code directly on the explorer
+- **Trust** — verified source proves the deployed bytecode matches your published code
+- **Debugging** — the explorer's zkEVM debugger can map execution traces back to source lines for verified contracts
+
+## Verification Form
+
+Navigate to `/contracts/verify` or click **Verify Contract** from any unverified contract page.
+
+### Required Fields
+
+**Contract Address** — the deployed contract address to verify.
+
+**Compiler Type** — choose one:
+
+| Type | Use When |
+|------|----------|
+| Solidity (single file) | Flattened single `.sol` file |
+| Solidity (multi-part) | Multiple `.sol` files (standard project layout) |
+| Vyper (JSON) | Vyper contracts with JSON input |
+
+**Compiler Version** — select the exact version used to compile the contract. The dropdown shows all available versions.
+
+**EVM Version** — the EVM target (e.g., `london`, `paris`). Select "Custom" to enter a specific version string.
+
+**Optimization** — whether optimization was enabled during compilation, and if so, how many optimizer runs.
+
+**Contract Name** — the name of the main contract (e.g., `MyVault`).
+
+### Source Code
+
+- **Single file**: Paste the flattened Solidity source into the built-in editor
+- **Multi-file**: Upload your source files and select the main contract file
+
+### Optional Fields
+
+**Constructor Arguments** — the ABI-encoded constructor arguments used at deployment. Required if the contract's constructor takes parameters.
+
+## Submit
+
+Click **Verify**. The explorer compiles your source with the specified settings and compares the resulting bytecode against what's deployed. If they match, the contract is verified immediately.
+
+If compilation fails, the explorer shows the compiler errors so you can correct your input.
+
+## What Verified Contracts Show
+
+Once verified, the contract's address page gains a **Contract** tab containing:
+
+- **Source code** — full syntax-highlighted source with line numbers
+- **ABI** — the contract's JSON ABI
+- **Compilation details** — compiler version, optimization settings, EVM version
+- **Constructor arguments** — decoded if provided
+
+The **Events** tab also benefits from verification — event names and parameter types are decoded rather than shown as raw hex topics.
+
+### How to Create a Safe Harbor Agreement
+
+*Create and configure your Safe Harbor agreement with bounty terms and scope*
+
+## Overview
+
+A Safe Harbor agreement defines the terms under which whitehats can attack your contracts. This guide covers all configuration options.
+
+## Create the Agreement
+
+Use `AgreementFactory` to create your agreement:
+
+```solidity
+AgreementDetails memory details = AgreementDetails({
+    protocolName: "My Protocol",
+    contactDetails: contacts,
+    chains: chains,
+    bountyTerms: bountyTerms,
+    agreementURI: "ipfs://QmYourAgreementHash"
+});
+
+bytes32 salt = keccak256("my-protocol-v1");
+address agreement = agreementFactory.create(details, owner, salt);
+```
+
+## Configure Contact Details
+
+Provide emergency contacts for whitehats:
+
+```solidity
+Contact[] memory contacts = new Contact[](2);
+
+contacts[0] = Contact({
+    name: "Security Lead",
+    contact: "security@myprotocol.com"
+});
+
+contacts[1] = Contact({
+    name: "Emergency Telegram",
+    contact: "@myprotocol_security"
+});
+```
+
+## Define Chain Scope
+
+Specify which contracts on which chains are covered:
+
+```solidity
+Account[] memory accounts = new Account[](2);
+
+accounts[0] = Account({
+    accountAddress: "0x1234...MyVault",
+    childContractScope: ChildContractScope.All
+});
+
+accounts[1] = Account({
+    accountAddress: "0x5678...MyStrategy",
+    childContractScope: ChildContractScope.None
+});
+
+Chain[] memory chains = new Chain[](1);
+chains[0] = Chain({
+    caip2ChainId: "eip155:325",  // BattleChain
+    assetRecoveryAddress: "0xYourRecoveryMultisig",
+    accounts: accounts
+});
+```
+
+### Child Contract Scope Options
+
+| Value | Meaning |
+|-------|---------|
+| `None` | Only the listed contract |
+| `ExistingOnly` | Contract + children created before agreement |
+| `All` | Contract + all children (past and future) |
+| `FutureOnly` | Contract + children created after agreement |
+
+## Configure Bounty Terms
+
+```solidity
+BountyTerms memory bountyTerms = BountyTerms({
+    bountyPercentage: 10,              // 10% of recovered funds
+    bountyCapUsd: 5_000_000,           // Max $5M per whitehat
+    retainable: true,                  // Whitehat keeps bounty from recovered
+    identity: IdentityRequirements.Anonymous,
+    diligenceRequirements: "",         // Only for Named identity
+    aggregateBountyCapUsd: 0           // 0 = no aggregate cap
+});
+```
+
+### Retainable vs Return-All
+
+- **Retainable** (`true`): Whitehat keeps bounty from recovered funds, sends rest to recovery
+- **Return-All** (`false`): Whitehat sends all funds to recovery, protocol pays bounty separately
+
+### Identity Options
+
+| Level | Requirement |
+|-------|-------------|
+| `Anonymous` | No identity verification |
+| `Pseudonymous` | Consistent pseudonym required |
+| `Named` | Legal name verification (specify process in `diligenceRequirements`) |
+
+## Extend Commitment Window
+
+Agreements must commit to terms for at least 7 days:
+
+```solidity
+// Extend to 30 days
+agreement.extendCommitmentWindow(block.timestamp + 30 days);
+```
+
+During the commitment window, you cannot make unfavorable changes to whitehats.
+
+## Adopt the Agreement
+
+Link your protocol to the agreement:
+
+```solidity
+safeHarborRegistry.adoptSafeHarbor(agreement);
+```
+
+## Modify an Existing Agreement
+
+You can update agreements, with restrictions during commitment:
+
+```solidity
+// Always allowed
+agreement.setProtocolName("New Name");
+agreement.setContactDetails(newContacts);
+agreement.addAccounts("eip155:325", newAccounts);
+
+// Only favorable changes during commitment
+agreement.setBountyTerms(betterTerms);
+
+// Blocked during commitment
+agreement.removeChains(chainIds);        // Reverts
+agreement.removeAccounts(chainId, addrs); // Reverts
+```
+
+- [How to Request Attack Mode](/battlechain/how-to/request-attack-mode): Next: Submit your contracts for attack mode
+
+### How to Request Attack Mode
+
+*Submit your contracts for DAO approval to enter attack mode*
+
+## Overview
+
+After deploying contracts and creating an agreement, request attack mode to enable Safe Harbor protection and allow whitehats to test your contracts.
+
+## Prerequisites
+
+Before requesting:
+
+1. Contracts deployed (via `BattleChainDeployer` or any other method)
+2. Agreement created via `AgreementFactory`
+3. Agreement adopted via `adoptSafeHarbor()`
+4. Commitment window extends at least 7 days
+
+## Request Attack Mode
+
+```solidity
+attackRegistry.requestUnderAttack(agreementAddress);
+```
+
+This validates:
+- Agreement was created by official factory
+- You're the agreement owner
+- All contracts were deployed via BattleChainDeployer
+- Commitment window meets minimum requirements
+
+## For Non-BattleChainDeployer Contracts
+
+If contracts weren't deployed via BattleChainDeployer:
+
+```solidity
+attackRegistry.requestUnderAttackByNonAuthorized(agreementAddress);
+```
+
+> **Warning:** This path requires extra DAO scrutiny since there's no on-chain proof of deployment.
+
+## Skip Attack Mode Entirely
+
+To go directly to production without attack testing:
+
+```solidity
+attackRegistry.goToProduction(agreementAddress);
+```
+
+This immediately sets state to `PRODUCTION` with no Safe Harbor protection.
+
+## Check Request Status
+
+```solidity
+IAttackRegistry.ContractState state = attackRegistry.getAgreementState(agreementAddress);
+
+// 2 = ATTACK_REQUESTED (waiting for DAO)
+// 3 = UNDER_ATTACK (approved!)
+// 0 = NOT_DEPLOYED (rejected or not requested)
+```
+
+## What Happens Next
+
+| Outcome | Timeline |
+|---------|----------|
+| DAO Approves | Immediate → `UNDER_ATTACK` |
+| DAO Rejects | Immediate → `NOT_DEPLOYED` |
+| DAO Takes No Action | 14 days → `PRODUCTION` (auto-promote) |
+
+## Troubleshooting
+
+| Error | Solution |
+|-------|----------|
+| `InvalidAgreement` | Agreement not from official factory |
+| `NotAgreementOwner` | Only agreement owner can request |
+| `AgreementOwnerNotAuthorized` | Call `authorizeAgreementOwner()` for each contract |
+| `InsufficientCommitment` | Extend commitment window to 7+ days |
+| `EmptyContractArray` | Add contracts to agreement's BattleChain scope |
+
+- [How to Promote to Production](/battlechain/how-to/promote-to-production): Next: Promote after stress testing
+
+### How to Promote to Production
+
+*Move your contracts from attack mode to production after stress testing*
+
+## Overview
+
+After successful stress testing, promote your contracts to production mode. This removes Safe Harbor protection and treats contracts like mainnet deployments.
+
+> **Warning:** Once promoted, there's no going back. Contracts cannot re-enter attack mode.
+
+## Request Promotion
+
+```solidity
+// Only the attack moderator can promote
+attackRegistry.promote(agreementAddress);
+```
+
+This starts a 3-day countdown. During this time:
+- Contracts are still attackable
+- Safe Harbor still applies
+- You can cancel if issues are found
+
+## Cancel Promotion
+
+If an issue is discovered during the 3-day wait:
+
+```solidity
+attackRegistry.cancelPromotion(agreementAddress);
+```
+
+This returns the agreement to `UNDER_ATTACK` state.
+
+## Check Promotion Status
+
+```solidity
+IAttackRegistry.AgreementInfo memory info = attackRegistry.getAgreementInfo(agreementAddress);
+
+if (info.promotionRequestedTimestamp > 0) {
+    uint256 promotionTime = info.promotionRequestedTimestamp + 3 days;
+
+    if (block.timestamp >= promotionTime) {
+        // Now in PRODUCTION
+    } else {
+        // Still in PROMOTION_REQUESTED, can cancel
+    }
+}
+```
+
+## Mark as Corrupted
+
+If a whitehat successfully exploits your contracts:
+
+```solidity
+attackRegistry.markCorrupted(agreementAddress);
+```
+
+This sets state to `CORRUPTED` (terminal), signaling the contracts are compromised.
+
+## Transfer Attack Moderator
+
+The attack moderator controls promotion. To transfer:
+
+```solidity
+attackRegistry.transferAttackModerator(agreementAddress, newModerator);
+```
+
+## After Promotion
+
+1. **Deploy to mainnet**: Your contracts are battle-tested
+2. **Keep monitoring**: Continue to watch your BattleChain deployment
+3. **Mirror updates**: Keep BattleChain and mainnet in sync
+4. **Use for staging**: Future updates can use BattleChain's attack mode
+
+- [Best Practices](/battlechain/explanation/best-practices): Learn best practices for using BattleChain
+
+### How to Find Attackable Contracts
+
+*Query the AttackRegistry to discover contracts you can legally attack*
+
+## Overview
+
+The `AttackRegistry` tracks which contracts are in attack mode. This guide shows how to find and verify targets.
+
+## Check a Specific Contract
+
+```solidity
+bool attackable = attackRegistry.isTopLevelContractUnderAttack(contractAddress);
+
+if (attackable) {
+    // Safe Harbor protection applies
+    // Contract is in UNDER_ATTACK or PROMOTION_REQUESTED state
+}
+```
+
+## Monitor for New Targets
+
+Watch for `AgreementStateChanged` events:
+
+```solidity
+event AgreementStateChanged(address indexed agreementAddress, ContractState newState);
+
+// newState = 3 (UNDER_ATTACK) - newly attackable
+// newState = 4 (PROMOTION_REQUESTED) - still attackable, 3-day countdown
+// newState = 5 (PRODUCTION) - no longer attackable
+// newState = 6 (CORRUPTED) - no longer attackable
+```
+
+## Get Agreement Details
+
+```solidity
+// Get agreement for a contract
+address agreementAddr = attackRegistry.getAgreementForContract(contractAddress);
+
+// Get all contracts in scope
+IAgreement agreement = IAgreement(agreementAddr);
+address[] memory contracts = agreement.getBattleChainScopeAddresses();
+
+// Get bounty terms
+BountyTerms memory terms = agreement.getBountyTerms();
+```
+
+## Verify Agreement Validity
+
+Always verify before attacking:
+
+```solidity
+// Check agreement was created by official factory
+bool isValid = safeHarborRegistry.isAgreementValid(agreementAddress);
+
+// Verify contract is in scope
+bool inScope = agreement.isContractInScope(targetContract);
+
+// Double-check state
+IAttackRegistry.ContractState state = attackRegistry.getAgreementState(agreementAddress);
+require(
+    state == ContractState.UNDER_ATTACK || state == ContractState.PROMOTION_REQUESTED,
+    "Not attackable"
+);
+```
+
+## Check Time Remaining
+
+For contracts in `PROMOTION_REQUESTED`:
+
+```solidity
+IAttackRegistry.AgreementInfo memory info = attackRegistry.getAgreementInfo(agreementAddress);
+
+if (info.promotionRequestedTimestamp > 0) {
+    uint256 productionAt = info.promotionRequestedTimestamp + 3 days;
+    uint256 timeLeft = productionAt - block.timestamp;
+    // Attack must complete before productionAt
+}
+```
+
+## Red Flags
+
+> **Warning:** Be cautious of:
+> 
+> - Suspiciously high bounties
+> - Very new agreements (less community vetting)
+> - Missing contact details
+> - Contracts identical to mainnet protocols
+
+- [How to Execute an Attack](/battlechain/how-to/execute-attack): Next: Execute your attack properly
+
+### How to Execute an Attack
+
+*Properly execute an attack and handle recovered funds*
+
+## Overview
+
+Once you've found an attackable contract, execute your exploit and handle funds according to the Safe Harbor terms.
+
+## Before Attacking
+
+1. Verify contract is in `UNDER_ATTACK` or `PROMOTION_REQUESTED` state
+2. Confirm contract is in the agreement's scope
+3. Note the recovery address
+4. Understand the bounty terms
+
+```solidity
+// Verify everything
+require(attackRegistry.isTopLevelContractUnderAttack(target), "Not attackable");
+require(agreement.isContractInScope(target), "Not in scope");
+
+// Get recovery address
+string memory recoveryStr = agreement.getAssetRecoveryAddress("eip155:325");
+address recovery = parseAddress(recoveryStr);
+
+// Get bounty terms
+BountyTerms memory terms = agreement.getBountyTerms();
+```
+
+## Execute Your Exploit
+
+There are no restrictions on how you attack in-scope contracts:
+
+```solidity
+contract Attacker {
+    function attack(address target) external {
+        // Your exploit logic here
+        IVulnerable(target).vulnerableFunction();
+    }
+}
+```
+
+## Handle Recovered Funds
+
+### If Retainable = true
+
+Keep your bounty, send the rest:
+
+```solidity
+uint256 recovered = address(this).balance;
+uint256 bountyPercent = terms.bountyPercentage;
+
+// Calculate bounty (respect the cap)
+uint256 bounty = (recovered * bountyPercent) / 100;
+// Note: Convert bountyCapUsd to token amount using oracle
+
+// Send remainder to recovery
+payable(recovery).transfer(recovered - bounty);
+```
+
+### If Retainable = false
+
+Send all funds to recovery:
+
+```solidity
+// Send everything
+payable(recovery).transfer(address(this).balance);
+
+// Protocol pays your bounty separately
+```
+
+## Multiple Token Types
+
+Handle each token type:
+
+```solidity
+// ETH
+payable(recovery).transfer(address(this).balance - ethBounty);
+
+// ERC20
+IERC20(token).transfer(recovery, balance - tokenBounty);
+
+// ERC721 (typically return all)
+IERC721(nft).transferFrom(address(this), recovery, tokenId);
+```
+
+## Bounty Calculation
+
+```
+Bounty = min(RecoveredValue x BountyPercentage%, BountyCapUsd)
+```
+
+Example:
+- Recovered: \$10M
+- Percentage: 10%
+- Cap: \$5M
+- **Your Bounty**: min(\$1M, \$5M) = **\$1M**
+
+## After the Attack
+
+1. **Document everything**: Keep transaction hashes, calculations
+2. **Meet identity requirements**: If required by the agreement
+3. **Consider mainnet implications**: If vulnerability exists on mainnet, contact the protocol privately
+
+> **Warning:** If the vulnerability also exists on mainnet, do NOT publicly disclose. Contact the protocol through their security contacts instead.
+
+- [How to Claim Bounties](/battlechain/how-to/claim-bounties): Learn more about bounty terms and caps
+
+### How to Claim Bounties
+
+*Understand bounty calculations, caps, and the claiming process*
+
+## Overview
+
+Each Safe Harbor agreement defines bounty terms. Understanding these ensures you receive fair compensation.
+
+## Read Bounty Terms
+
+```solidity
+BountyTerms memory terms = agreement.getBountyTerms();
+
+uint256 percentage = terms.bountyPercentage;      // e.g., 10 for 10%
+uint256 cap = terms.bountyCapUsd;                 // e.g., 5_000_000
+bool canRetain = terms.retainable;                // Keep from recovered?
+IdentityRequirements identity = terms.identity;   // KYC level
+uint256 aggregateCap = terms.aggregateBountyCapUsd;  // Total cap across whitehats
+```
+
+## Calculate Your Bounty
+
+```
+Bounty = min(RecoveredValue x BountyPercentage%, BountyCapUsd)
+```
+
+### Examples
+
+| Recovered | Percentage | Cap | Your Bounty |
+|-----------|------------|-----|-------------|
+| \$500K | 10% | \$5M | \$50K |
+| \$10M | 10% | \$5M | \$1M |
+| \$100M | 10% | \$5M | \$5M (capped) |
+
+## Convert USD Cap to Tokens
+
+Caps are in USD. Convert using current prices:
+
+```solidity
+uint256 capUsd = terms.bountyCapUsd;  // $5,000,000
+uint256 ethPrice = 2000;               // Get from oracle
+uint256 capInEth = capUsd * 1e18 / ethPrice;  // 2,500 ETH
+```
+
+## Retainable vs Return-All
+
+### Retainable (`true`)
+
+```solidity
+uint256 recovered = 100 ether;
+uint256 bounty = (recovered * 10) / 100;  // 10 ETH
+
+// Keep bounty, send rest
+payable(recovery).transfer(recovered - bounty);  // Send 90 ETH
+// You keep 10 ETH
+```
+
+### Return-All (`false`)
+
+```solidity
+// Send everything
+payable(recovery).transfer(recovered);  // Send 100 ETH
+
+// Protocol pays bounty separately through their own process
+```
+
+## Aggregate Bounty Cap
+
+If `aggregateBountyCapUsd > 0`, total bounties across all whitehats are capped:
+
+```
+Total Payouts ≤ AggregateBountyCapUsd
+```
+
+If multiple whitehats exploit the same issue, they share the aggregate cap proportionally.
+
+> **Note:** Aggregate caps cannot be used with `retainable = true`.
+
+## Get Recovery Address
+
+```solidity
+string memory recoveryStr = agreement.getAssetRecoveryAddress("eip155:325");
+// Parse to address for transfers
+```
+
+## Tax Considerations
+
+> **Warning:** Bounties are likely taxable income. Keep records of:
+> 
+> - Date of attack
+> - Assets recovered (types and amounts)
+> - Bounty received
+> - USD value at time of receipt
+
+- [Safe Harbor Protection](/battlechain/explanation/safe-harbor): Understand your legal protections
+
+### How to Approve or Reject Requests
+
+*Process attack mode requests as a DAO member*
+
+## Overview
+
+As the registry moderator, you review attack requests and decide whether to approve or reject them.
+
+## Approve a Request
+
+If the request passes review:
+
+```solidity
+attackRegistry.approveAttack(agreementAddress);
+```
+
+Effects:
+- State changes to `UNDER_ATTACK`
+- Safe Harbor protection begins
+- Whitehats can attack
+
+## Reject a Request
+
+If the request fails review:
+
+```solidity
+attackRegistry.rejectAttackRequest(agreementAddress);
+```
+
+Effects:
+- State returns to `NOT_DEPLOYED`
+- Contract mappings cleared
+- Protocol can resubmit with fixes
+
+## Review Checklist
+
+Before deciding, verify:
+
+1. **Deployment method**: Deployed via BattleChainDeployer?
+2. **Not a copycat**: Bytecode doesn't match mainnet contracts
+3. **Legitimate protocol**: Has web presence, audit reports, valid contacts
+4. **Reasonable terms**: Bounty percentage in normal range (5-15%)
+5. **Clear scope**: All contracts properly defined
+
+## Check Deployment Method
+
+```solidity
+address[] memory contracts = agreement.getBattleChainScopeAddresses();
+
+for (uint i = 0; i < contracts.length; i++) {
+    address deployer = attackRegistry.getContractDeployer(contracts[i]);
+
+    if (deployer == address(0)) {
+        // NOT via BattleChainDeployer - extra scrutiny needed
+    }
+}
+```
+
+## Timing
+
+| Scenario | Action |
+|----------|--------|
+| Clear approval | Approve immediately |
+| Clear rejection | Reject with feedback |
+| Needs investigation | Decide before 14-day deadline |
+| Approaching deadline, uncertain | Reject to reset clock |
+
+> **Note:** If no action is taken within 14 days, the agreement auto-promotes to `PRODUCTION`.
+
+## Batch Processing
+
+Process multiple requests efficiently:
+
+```solidity
+function batchProcess(
+    address[] calldata toApprove,
+    address[] calldata toReject
+) external {
+    for (uint i = 0; i < toApprove.length; i++) {
+        attackRegistry.approveAttack(toApprove[i]);
+    }
+    for (uint i = 0; i < toReject.length; i++) {
+        attackRegistry.rejectAttackRequest(toReject[i]);
+    }
+}
+```
+
+- [How to Use Instant Promotion](/battlechain/how-to/instant-promotion): Handle emergency copycat situations
+
+### How to Use Instant Promotion
+
+*Emergency promotion for copycat or high-risk situations*
+
+## Overview
+
+The DAO can instantly promote contracts to production, bypassing the 3-day delay. This is an emergency power for protecting the ecosystem.
+
+> **Warning:** Use instant promotion only for genuine emergencies.
+
+## When to Use
+
+### Copycat Discovery
+
+A mainnet contract mirrors an attackable BattleChain contract:
+
+1. Whitehat finds vulnerability on BattleChain
+2. Someone deploys identical contract to mainnet
+3. Mainnet contract is now vulnerable
+4. **Action**: Instant promote to stop further disclosure
+
+### TVL Surge
+
+Unexpected liquidity growth creates unreasonable risk:
+
+1. Protocol deployed with \$100K TVL
+2. TVL grows to \$10M unexpectedly
+3. Risk/reward ratio changes dramatically
+4. **Action**: Consider instant promotion if protocol requests
+
+### Protocol Emergency
+
+Protocol discovers critical issue and needs to exit attack mode:
+
+1. Protocol finds vulnerability themselves
+2. Need to patch without whitehats exploiting
+3. **Action**: Instant promote to protect users
+
+## Execute Instant Promotion
+
+```solidity
+attackRegistry.instantPromote(agreementAddress);
+```
+
+Valid from these states:
+- `ATTACK_REQUESTED` → skips attack phase entirely
+- `UNDER_ATTACK` → ends attack immediately
+- `PROMOTION_REQUESTED` → bypasses 3-day delay
+
+## Effects
+
+- State immediately becomes `PRODUCTION`
+- Safe Harbor protection ends
+- Contracts are no longer attackable
+
+## Communication Template
+
+Document and communicate the action:
+
+```
+EMERGENCY INSTANT PROMOTION
+
+Agreement: 0x1234...
+Protocol: [Name]
+Previous State: UNDER_ATTACK
+New State: PRODUCTION
+
+Reason: [Copycat detected / TVL surge / Protocol emergency]
+
+Details: [Specific circumstances]
+
+Actions taken:
+- Instant promotion at block [number]
+- Protocol notified
+- [Other actions]
+```
+
+- [Governance Parameters](/battlechain/reference/governance-parameters): Understand DAO-controlled parameters
+
+---
+
+## Reference
+
+### Contract API Reference
+
+*Complete API reference for BattleChain contracts*
+
+## Deployed Addresses
+
+| Contract | Testnet | Mainnet |
+|----------|---------|---------|
+| AttackRegistry (Proxy) | 0x9E62988ccA776ff6613Fa68D34c9AB5431Ce57e1 | TBD |
+| SafeHarborRegistry (Proxy) | 0xCb2A561395118895e2572A04C2D8AB8eCA8d7E5D | TBD |
+| AgreementFactory (Proxy) | 0x0EbBEeB3aBeF51801a53Fdd1fb263Ac0f2E3Ed36 | TBD |
+| BattleChainDeployer | 0x8f57054CBa2021bEE15631067dd7B7E0B43F17Dc | TBD |
+
+---
+
+## AttackRegistry
+
+Tracks attack/production status of contracts.
+
+### State-Changing Functions
+
+```solidity
+// Protocol functions
+function requestUnderAttack(address agreementAddress) external;
+function requestUnderAttackByNonAuthorized(address agreementAddress) external;
+function goToProduction(address agreementAddress) external;
+
+// Attack moderator functions
+function promote(address agreementAddress) external;
+function cancelPromotion(address agreementAddress) external;
+function markCorrupted(address agreementAddress) external;
+function transferAttackModerator(address agreementAddress, address newModerator) external;
+
+// Deployer functions
+function authorizeAgreementOwner(address contractAddress, address newOwner) external;
+
+// DAO functions
+function approveAttack(address agreementAddress) external;
+function rejectAttackRequest(address agreementAddress) external;
+function instantPromote(address agreementAddress) external;
+```
+
+### View Functions
+
+```solidity
+function isTopLevelContractUnderAttack(address contractAddress) external view returns (bool);
+function getAgreementState(address agreementAddress) external view returns (ContractState);
+function getAgreementInfo(address agreementAddress) external view returns (AgreementInfo memory);
+function getAgreementForContract(address contractAddress) external view returns (address);
+function getAttackModerator(address agreementAddress) external view returns (address);
+function getContractDeployer(address contractAddress) external view returns (address);
+function getAuthorizedOwner(address contractAddress) external view returns (address);
+function getRegistryModerator() external view returns (address);
+```
+
+### Events
+
+```solidity
+event AgreementStateChanged(address indexed agreementAddress, ContractState newState);
+event AttackModeratorTransferred(address indexed agreementAddress, address indexed newModerator);
+event ContractRegistered(address indexed contractAddress, address indexed agreementAddress);
+event AgreementOwnerAuthorized(address indexed contractAddress, address indexed authorizedOwner);
+```
+
+---
+
+## Agreement
+
+Per-protocol Safe Harbor terms.
+
+### Owner Functions
+
+```solidity
+function setProtocolName(string calldata protocolName) external;
+function setContactDetails(Contact[] memory contactDetails) external;
+function addOrSetChains(Chain[] memory chains) external;
+function removeChains(string[] memory caip2ChainIds) external;
+function addAccounts(string memory caip2ChainId, Account[] memory newAccounts) external;
+function removeAccounts(string memory caip2ChainId, string[] memory accountAddresses) external;
+function setBountyTerms(BountyTerms memory bountyTerms) external;
+function setAgreementURI(string calldata agreementURI) external;
+function extendCommitmentWindow(uint256 newCantChangeUntil) external;
+```
+
+### View Functions
+
+```solidity
+function getDetails() external view returns (AgreementDetails memory);
+function getProtocolName() external view returns (string memory);
+function getBountyTerms() external view returns (BountyTerms memory);
+function getAgreementURI() external view returns (string memory);
+function getChainIds() external view returns (string[] memory);
+function getChainAccounts(string memory caip2ChainId) external view returns (Account[] memory);
+function getAssetRecoveryAddress(string memory caip2ChainId) external view returns (string memory);
+function getCantChangeUntil() external view returns (uint256);
+function getBattleChainScopeAddresses() external view returns (address[] memory);
+function isContractInScope(address contractAddress) external view returns (bool);
+```
+
+---
+
+## AgreementFactory
+
+Creates Agreement contracts.
+
+```solidity
+function create(
+    AgreementDetails memory details,
+    address owner,
+    bytes32 salt
+) external returns (address agreementAddress);
+
+function isAgreementContract(address agreementAddress) external view returns (bool);
+function getRegistry() external view returns (address);
+function getBattleChainCaip2ChainId() external view returns (string memory);
+```
+
+---
+
+## BattleChainSafeHarborRegistry
+
+Maps protocols to agreements.
+
+```solidity
+function adoptSafeHarbor(address agreementAddress) external;
+function getAgreement(address adopter) external view returns (address);
+function isChainValid(string calldata caip2ChainId) external view returns (bool);
+function isAgreementValid(address agreementAddress) external view returns (bool);
+```
+
+---
+
+## BattleChainDeployer
+
+Deploys contracts with automatic registration.
+
+Supports all CreateX methods:
+- `deployCreate()`, `deployCreateAndInit()`, `deployCreateClone()`
+- `deployCreate2()`, `deployCreate2AndInit()`, `deployCreate2Clone()`
+- `deployCreate3()`, `deployCreate3AndInit()`
+
+All deployments automatically call `AttackRegistry.registerDeployment()`.
+
+### Contract States
+
+*Reference for all contract states and transitions*
+
+## State Enum
+
+```solidity
+enum ContractState {
+    NOT_DEPLOYED,        // 0
+    NEW_DEPLOYMENT,      // 1
+    ATTACK_REQUESTED,    // 2
+    UNDER_ATTACK,        // 3
+    PROMOTION_REQUESTED, // 4
+    PRODUCTION,          // 5
+    CORRUPTED            // 6
+}
+```
+
+## State Details
+
+| State | Value | Attackable | Terminal | Description |
+|-------|-------|------------|----------|-------------|
+| `NOT_DEPLOYED` | 0 | No | No | Not registered or rejected |
+| `NEW_DEPLOYMENT` | 1 | No | No | Deployed via BattleChainDeployer |
+| `ATTACK_REQUESTED` | 2 | No | No | Awaiting DAO approval |
+| `UNDER_ATTACK` | 3 | **Yes** | No | Open for whitehats |
+| `PROMOTION_REQUESTED` | 4 | **Yes** | No | 3-day promotion countdown |
+| `PRODUCTION` | 5 | No | **Yes** | Protected like mainnet |
+| `CORRUPTED` | 6 | No | **Yes** | Successfully exploited |
+
+## Querying State
+
+```solidity
+// Check if contract is attackable (UNDER_ATTACK or PROMOTION_REQUESTED)
+bool attackable = attackRegistry.isTopLevelContractUnderAttack(contractAddress);
+
+// Get exact state
+IAttackRegistry.ContractState state = attackRegistry.getAgreementState(agreementAddress);
+
+// Get full info
+IAttackRegistry.AgreementInfo memory info = attackRegistry.getAgreementInfo(agreementAddress);
+```
+
+## State Transitions
+
+### From NOT_DEPLOYED
+- → `NEW_DEPLOYMENT`: Deploy via BattleChainDeployer
+
+### From NEW_DEPLOYMENT
+- → `ATTACK_REQUESTED`: Call `requestUnderAttack()`
+- → `PRODUCTION`: Call `goToProduction()`
+
+### From ATTACK_REQUESTED
+- → `UNDER_ATTACK`: DAO calls `approveAttack()`
+- → `NOT_DEPLOYED`: DAO calls `rejectAttackRequest()`
+- → `PRODUCTION`: DAO calls `instantPromote()` or auto after 14 days
+
+### From UNDER_ATTACK
+- → `PROMOTION_REQUESTED`: Attack moderator calls `promote()`
+- → `CORRUPTED`: Attack moderator calls `markCorrupted()`
+- → `PRODUCTION`: DAO calls `instantPromote()`
+
+### From PROMOTION_REQUESTED
+- → `PRODUCTION`: After 3 days automatically
+- → `UNDER_ATTACK`: Attack moderator calls `cancelPromotion()`
+- → `CORRUPTED`: Attack moderator calls `markCorrupted()`
+- → `PRODUCTION`: DAO calls `instantPromote()`
+
+### From PRODUCTION
+None (terminal state)
+
+### From CORRUPTED
+None (terminal state)
+
+## Time Constants
+
+```solidity
+uint256 public constant PROMOTION_WINDOW = 14 days;
+uint256 public constant PROMOTION_DELAY = 3 days;
+uint256 public constant MIN_COMMITMENT = 7 days;
+```
+
+### Bounty Terms
+
+*Reference for bounty configuration options*
+
+## BountyTerms Structure
+
+```solidity
+struct BountyTerms {
+    uint256 bountyPercentage;       // 0-100
+    uint256 bountyCapUsd;           // Max per whitehat in USD
+    bool retainable;                // Keep from recovered funds?
+    IdentityRequirements identity;  // KYC level required
+    string diligenceRequirements;   // For Named identity
+    uint256 aggregateBountyCapUsd;  // Total cap across all whitehats
+}
+```
+
+## Fields
+
+### bountyPercentage
+
+Percentage of recovered funds the whitehat receives.
+
+- **Range**: 0-100
+- **Typical**: 10%
+- **Note**: Actual bounty is `min(recovered x percentage, bountyCapUsd)`
+
+### bountyCapUsd
+
+Maximum bounty per whitehat in USD.
+
+- **Typical**: \$1M - \$5M
+- **Note**: Requires oracle conversion to token amounts
+
+### retainable
+
+Whether whitehats keep bounty from recovered funds.
+
+| Value | Meaning |
+|-------|---------|
+| `true` | Whitehat keeps bounty, sends rest to recovery |
+| `false` | Whitehat sends all to recovery, protocol pays separately |
+
+### identity
+
+Identity verification requirements.
+
+```solidity
+enum IdentityRequirements {
+    Anonymous,     // 0 - No verification
+    Pseudonymous,  // 1 - Consistent pseudonym
+    Named          // 2 - Legal name verification
+}
+```
+
+### diligenceRequirements
+
+Additional requirements for `Named` identity. May specify KYC provider, documentation needed, etc.
+
+### aggregateBountyCapUsd
+
+Total cap across all whitehats for a single exploit.
+
+- **Value 0**: No aggregate cap
+- **Non-zero**: Total payouts ≤ this value
+- **Note**: Cannot use with `retainable = true`
+
+## Bounty Calculation
+
+```
+Individual Bounty = min(RecoveredValue x bountyPercentage%, bountyCapUsd)
+
+If aggregateBountyCapUsd > 0:
+  Total Payouts ≤ aggregateBountyCapUsd
+```
+
+## Examples
+
+### Standard Terms
+
+```solidity
+BountyTerms({
+    bountyPercentage: 10,
+    bountyCapUsd: 5_000_000,
+    retainable: true,
+    identity: IdentityRequirements.Anonymous,
+    diligenceRequirements: "",
+    aggregateBountyCapUsd: 0
+})
+```
+
+### High-Value Protocol
+
+```solidity
+BountyTerms({
+    bountyPercentage: 10,
+    bountyCapUsd: 10_000_000,
+    retainable: false,
+    identity: IdentityRequirements.Named,
+    diligenceRequirements: "Complete KYC via Persona",
+    aggregateBountyCapUsd: 50_000_000
+})
+```
+
+## Validation Rules
+
+- `bountyPercentage` cannot exceed 100
+- `aggregateBountyCapUsd` cannot be used with `retainable = true`
+- `aggregateBountyCapUsd` must be ≥ `bountyCapUsd` if non-zero
+
+### Identity Requirements
+
+*Reference for whitehat identity verification levels*
+
+## Identity Enum
+
+```solidity
+enum IdentityRequirements {
+    Anonymous,     // 0
+    Pseudonymous,  // 1
+    Named          // 2
+}
+```
+
+## Levels
+
+### Anonymous (0)
+
+No identity verification required.
+
+| Aspect | Detail |
+|--------|--------|
+| Verification | None |
+| Privacy | Full |
+| Typical Bounty Cap | \$100K - \$1M |
+| Best For | Maximum participation |
+
+### Pseudonymous (1)
+
+Consistent pseudonym required.
+
+| Aspect | Detail |
+|--------|--------|
+| Verification | Provide consistent username/handle |
+| Privacy | Real identity protected |
+| Typical Bounty Cap | \$500K - \$5M |
+| Best For | Building reputation while private |
+
+**How to comply:**
+- Choose a consistent pseudonym
+- Use same name in all protocol communications
+- Optionally link to reputation (GitHub, Twitter)
+
+### Named (2)
+
+Legal name verification required.
+
+| Aspect | Detail |
+|--------|--------|
+| Verification | Legal name confirmed via specified process |
+| Privacy | Identity disclosed to protocol |
+| Typical Bounty Cap | \$1M - \$10M+ |
+| Best For | High-value bounties, regulated protocols |
+
+**How to comply:**
+- Check `diligenceRequirements` field
+- Complete specified KYC process
+- May involve ID verification, video call, legal agreement
+
+## Checking Requirements
+
+```solidity
+BountyTerms memory terms = agreement.getBountyTerms();
+
+if (terms.identity == IdentityRequirements.Anonymous) {
+    // No verification needed
+}
+
+if (terms.identity == IdentityRequirements.Pseudonymous) {
+    // Provide consistent pseudonym
+}
+
+if (terms.identity == IdentityRequirements.Named) {
+    // Check diligenceRequirements
+    string memory requirements = terms.diligenceRequirements;
+    // Complete specified process
+}
+```
+
+## Filtering by Comfort Level
+
+```solidity
+// Only attack contracts matching your privacy preference
+if (uint8(terms.identity) <= maxIdentityLevel) {
+    // Acceptable identity requirement
+}
+```
+
+## Strictness During Commitment
+
+Identity requirements cannot become stricter during the commitment window:
+
+```
+Anonymous < Pseudonymous < Named
+```
+
+A change from `Anonymous` to `Pseudonymous` during commitment would revert.
+
+### Governance Parameters
+
+*Reference for DAO-controlled parameters*
+
+## Registry Moderator
+
+The address that can approve/reject requests and instant promote.
+
+```solidity
+// Get current moderator
+address moderator = attackRegistry.getRegistryModerator();
+
+// Change moderator (owner only)
+attackRegistry.changeRegistryModerator(newModerator);
+```
+
+## Valid Chains
+
+CAIP-2 chain IDs that can be used in agreements.
+
+```solidity
+// Check if chain is valid
+bool valid = safeHarborRegistry.isChainValid("eip155:1");
+
+// Set chains as valid (owner only)
+safeHarborRegistry.setValidChains(chainIds);
+
+// Set chains as invalid (owner only)
+safeHarborRegistry.setInvalidChains(chainIds);
+```
+
+### Common Chain IDs
+
+| Chain | CAIP-2 ID |
+|-------|-----------|
+| Ethereum Mainnet | `eip155:1` |
+| Arbitrum One | `eip155:42161` |
+| Optimism | `eip155:10` |
+| Base | `eip155:8453` |
+| BattleChain Testnet | `eip155:627` |
+
+## Time Constants
+
+Set at deployment (require upgrade to change):
+
+```solidity
+uint256 public constant PROMOTION_WINDOW = 14 days;
+uint256 public constant PROMOTION_DELAY = 3 days;
+uint256 public constant MIN_COMMITMENT = 7 days;
+```
+
+| Constant | Value | Effect |
+|----------|-------|--------|
+| `PROMOTION_WINDOW` | 14 days | Auto-promote if DAO inactive |
+| `PROMOTION_DELAY` | 3 days | Delay after `promote()` |
+| `MIN_COMMITMENT` | 7 days | Minimum agreement commitment |
+
+## Agreement Factory
+
+Creates and validates agreements.
+
+```solidity
+// Get factory
+address factory = safeHarborRegistry.getAgreementFactory();
+
+// Set factory (owner only)
+safeHarborRegistry.setAgreementFactory(newFactory);
+
+// Check if agreement is valid
+bool valid = agreementFactory.isAgreementContract(agreementAddress);
+```
+
+## Safe Harbor Registry
+
+Links protocols to agreements.
+
+```solidity
+// Get registry
+address registry = attackRegistry.getSafeHarborRegistry();
+
+// Set registry (owner only)
+attackRegistry.setSafeHarborRegistry(newRegistry);
+```
+
+## BattleChain Deployer
+
+Registers new deployments.
+
+```solidity
+// Get deployer
+address deployer = attackRegistry.getBattleChainDeployer();
+
+// Set deployer (owner only)
+attackRegistry.setBattleChainDeployer(newDeployer);
+```
+
+## Contract Upgrades
+
+Both `AttackRegistry` and `AgreementFactory` use UUPS upgradeable pattern:
+
+```solidity
+// Owner can authorize upgrades
+function _authorizeUpgrade(address newImplementation) internal override onlyOwner;
+```
+
+---
+
+## Concepts
+
+### The Contract Lifecycle
+
+*Understanding how contracts move through BattleChain states*
+
+## Overview
+
+Every agreement on BattleChain follows a defined lifecycle. Understanding this helps you know what's possible at each stage.
+
+## The State Machine
+
+```
+                              ┌─────────────────┐
+                              │  NOT_DEPLOYED   │
+                              └────────┬────────┘
+                                       │ Deploy via BattleChainDeployer
+                                       ▼
+                              ┌─────────────────┐
+                              │ NEW_DEPLOYMENT  │
+                              └────────┬────────┘
+                                       │ requestUnderAttack()
+                                       ▼
+                              ┌─────────────────┐
+                              │ATTACK_REQUESTED │◄──── DAO reviews here
+                              └────────┬────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+              ▼                        ▼                        ▼
+     ┌────────────────┐      ┌────────────────┐       ┌────────────────┐
+     │    REJECTED    │      │  UNDER_ATTACK  │       │   PRODUCTION   │
+     │ (NOT_DEPLOYED) │      │   Attackable!  │       │ (instantPromote)
+     └────────────────┘      └────────┬───────┘       └────────────────┘
+                                      │ promote()
+                                      ▼
+                              ┌─────────────────┐
+                              │   PROMOTION_    │
+                              │   REQUESTED     │ Still attackable!
+                              └────────┬────────┘
+                                       │
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+              ▼                        ▼                        ▼
+     ┌────────────────┐      ┌────────────────┐       ┌────────────────┐
+     │  UNDER_ATTACK  │      │   PRODUCTION   │       │   CORRUPTED    │
+     │(cancelPromotion)│     │  (after 3 days)│       │ (markCorrupted)│
+     └────────────────┘      └────────────────┘       └────────────────┘
+```
+
+## State Descriptions
+
+### NOT_DEPLOYED
+
+Default state for unregistered contracts or rejected requests.
+
+- **Attackable**: No
+- **Next states**: NEW_DEPLOYMENT (via BattleChainDeployer)
+
+### NEW_DEPLOYMENT
+
+Contracts deployed via BattleChainDeployer start here.
+
+- **Attackable**: No
+- **Next states**: ATTACK_REQUESTED or PRODUCTION (goToProduction)
+
+### ATTACK_REQUESTED
+
+Waiting for DAO approval.
+
+- **Attackable**: No
+- **Next states**: UNDER_ATTACK (approved), NOT_DEPLOYED (rejected), PRODUCTION (instant or auto after 14 days)
+
+### UNDER_ATTACK
+
+**Open for whitehats.** Safe Harbor protection applies.
+
+- **Attackable**: Yes
+- **Next states**: PROMOTION_REQUESTED, CORRUPTED, PRODUCTION (instant)
+
+### PROMOTION_REQUESTED
+
+3-day countdown to production. Still attackable!
+
+- **Attackable**: Yes
+- **Next states**: PRODUCTION (after 3 days), UNDER_ATTACK (cancel), CORRUPTED
+
+### PRODUCTION
+
+**Terminal.** Protected like mainnet.
+
+- **Attackable**: No
+- **Next states**: None
+
+### CORRUPTED
+
+**Terminal.** Successfully exploited.
+
+- **Attackable**: No
+- **Next states**: None
+
+## Key Timeframes
+
+| Constant | Duration | Purpose |
+|----------|----------|---------|
+| `PROMOTION_WINDOW` | 14 days | Auto-promote if DAO doesn't act |
+| `PROMOTION_DELAY` | 3 days | Delay after promote() |
+| `MIN_COMMITMENT` | 7 days | Minimum agreement commitment |
+
+## Who Controls What
+
+| Action | Who Can Do It |
+|--------|---------------|
+| `requestUnderAttack()` | Agreement owner |
+| `promote()` | Attack moderator |
+| `cancelPromotion()` | Attack moderator |
+| `markCorrupted()` | Attack moderator |
+| `approveAttack()` | Registry moderator (DAO) |
+| `rejectAttackRequest()` | Registry moderator (DAO) |
+| `instantPromote()` | Registry moderator (DAO) |
+
+### Safe Harbor Protection
+
+*Understanding the legal protections for whitehats on BattleChain*
+
+## What is Safe Harbor?
+
+Safe Harbor is a legal framework that protects whitehats who attack contracts on BattleChain. When a protocol adopts a Safe Harbor agreement and their contracts enter attack mode, they commit to not pursuing legal action against whitehats who follow the rules.
+
+## What's Protected
+
+When attacking contracts in `UNDER_ATTACK` or `PROMOTION_REQUESTED` state:
+
+- Exploiting vulnerabilities in in-scope contracts
+- Extracting funds from vulnerable contracts
+- Keeping your bounty percentage (up to the cap)
+- Acting without prior coordination
+- Remaining anonymous (if allowed by terms)
+
+## What's NOT Protected
+
+Safe Harbor does NOT cover:
+
+- Attacking `PRODUCTION` contracts
+- Attacking contracts outside the agreement's scope
+- Keeping more than your bounty entitlement
+- Ignoring identity requirements
+- Causing harm beyond the exploit itself
+
+## The Agreement Structure
+
+Every Safe Harbor agreement includes:
+
+```solidity
+struct AgreementDetails {
+    string protocolName;        // Who is this?
+    Contact[] contactDetails;   // How to reach them
+    Chain[] chains;             // What's in scope
+    BountyTerms bountyTerms;    // What you earn
+    string agreementURI;        // Full legal document
+}
+```
+
+## Commitment Window
+
+Protocols commit to not changing terms unfavorably during a commitment window:
+
+```solidity
+uint256 cantChangeUntil = agreement.getCantChangeUntil();
+```
+
+During this window, they cannot:
+- Reduce bounty percentage or caps
+- Remove contracts from scope
+- Make identity requirements stricter
+- Change from retainable to return-all
+
+This protects you from "bait and switch" tactics.
+
+## Verifying Protection
+
+Before attacking, always verify:
+
+```solidity
+// 1. Agreement is valid
+bool valid = safeHarborRegistry.isAgreementValid(agreementAddress);
+
+// 2. Contract is attackable
+bool attackable = attackRegistry.isTopLevelContractUnderAttack(contractAddress);
+
+// 3. Contract is in scope
+bool inScope = agreement.isContractInScope(contractAddress);
+```
+
+## The Agreement Document
+
+The `agreementURI` points to the full legal document:
+
+```solidity
+string memory uri = agreement.getAgreementURI();
+// e.g., "ipfs://QmXXXXXX"
+```
+
+On-chain data is a summary; the URI document is authoritative.
+
+## If Something Goes Wrong
+
+### Protocol Claims Violation
+
+1. Document your compliance (transactions, calculations)
+2. Show you met all requirements
+3. Involve neutral parties if needed
+
+### Terms Changed Unfavorably
+
+1. Check if changes were during commitment window
+2. Archive evidence of state at attack time
+3. Escalate to DAO for arbitration
+
+## Due Diligence
+
+> **Warning:** Before exploiting a vulnerability:
+> 
+> - Verify the same vulnerability doesn't exist on mainnet
+> - Consider if disclosure could harm other protocols
+> - Use traditional bug bounty for mainnet-affecting issues
+
+### Best Practices
+
+*Guidelines for getting the most out of BattleChain*
+
+## For Protocols
+
+### Deploy Identical Code
+
+Deploy the exact same bytecode you'll use on mainnet. Only differ in:
+- Constructor parameters (addresses, chain IDs)
+- Configuration values that legitimately differ per-chain
+
+```solidity
+// Good: Same contract, different config
+new MyVault(battleChainOracle, chainSpecificFee);
+
+// Bad: Different code for BattleChain
+new MyVaultTestVersion();  // Don't do this
+```
+
+### Start with Reasonable Liquidity
+
+Deploy enough to attract whitehats, but not more than you're comfortable losing:
+
+| Protocol Type | Suggested Liquidity |
+|--------------|---------------------|
+| DEX/AMM | \$50K - \$200K |
+| Lending | \$100K - \$500K |
+| Yield Aggregator | \$50K - \$150K |
+| NFT/Gaming | \$10K - \$50K |
+
+### Complete Audit First
+
+BattleChain is for stress testing, not finding obvious bugs:
+
+```
+Audit → BattleChain → Mainnet
+```
+
+### Set Competitive Bounty Terms
+
+Attract whitehats with reasonable terms:
+- 10% bounty (industry standard)
+- \$5M cap (attractive for serious researchers)
+- `retainable = true` (easier for whitehats)
+- `Anonymous` identity (lower barrier)
+
+### Plan Testing Duration
+
+| Risk Level | Minimum Attack Period |
+|------------|----------------------|
+| Low (simple) | 1-2 weeks |
+| Medium (DeFi primitives) | 2-4 weeks |
+| High (complex DeFi) | 4-8 weeks |
+
+## For Whitehats
+
+### Verify Before Attacking
+
+Always check:
+1. Contract is in attackable state
+2. Contract is in agreement scope
+3. Agreement is valid (from official factory)
+4. You understand the bounty terms
+
+### Handle Funds Correctly
+
+Follow the agreement terms exactly:
+- Calculate bounty properly
+- Send correct amount to recovery address
+- Document everything
+
+### Consider Mainnet Implications
+
+If your exploit works on mainnet too:
+- Don't publicly disclose
+- Contact the protocol privately
+- Consider traditional bug bounty
+
+### Keep Records
+
+Document:
+- Target contract and agreement
+- Vulnerability details
+- Transaction hashes
+- Bounty calculations
+- Funds sent to recovery
+
+## For the DAO
+
+### Review Thoroughly
+
+Check every request for:
+- Mainnet copycats (most important)
+- Valid deployment method
+- Reasonable bounty terms
+- Clear scope definition
+
+### Act Promptly
+
+- Approve/reject within days, not weeks
+- Remember: 14-day auto-promotion if no action
+- Reject to reset clock if more time needed
+
+### Document Decisions
+
+Record:
+- What was reviewed
+- Checks performed
+- Decision rationale
+- Any concerns
+
+### Use Instant Promotion Sparingly
+
+Only for genuine emergencies:
+- Copycat discovered on mainnet
+- Unexpected TVL surge
+- Protocol emergency request
