@@ -28,13 +28,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StateBadge } from "@/components/web3/state-badge";
 import { CONTRACTS } from "@/lib/contracts/addresses";
 import { ContractState, CONTRACT_STATE_LABELS } from "@/lib/contracts/types";
-import { FileText, Search, Plus, ExternalLink } from "lucide-react";
+import { useDeployments } from "@/lib/hooks/use-deployments";
+import { FileText, Search, Plus, ExternalLink, Rocket } from "lucide-react";
 
 interface AgreementRow {
   address: `0x${string}`;
   latestState: ContractState;
   blockNumber: bigint;
 }
+
 
 export default function AgreementsPage() {
   return (
@@ -47,6 +49,7 @@ export default function AgreementsPage() {
 function AgreementsContent() {
   const publicClient = usePublicClient();
   const [agreements, setAgreements] = useState<AgreementRow[]>([]);
+  const { deployments } = useDeployments();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<string>("all");
@@ -124,6 +127,50 @@ function AgreementsContent() {
           </SelectContent>
         </Select>
       </div>
+
+      {/* My Deployed Contracts */}
+      {deployments.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="flex items-center gap-2 px-6 pt-5 pb-3">
+              <Rocket className="h-5 w-5 text-blue-400" />
+              <h3 className="text-sm font-semibold">My Deployed Contracts</h3>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Contract Address</TableHead>
+                  <TableHead>Label</TableHead>
+                  <TableHead>Deployed</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {deployments.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell className="font-mono text-sm">
+                      {d.contract_address.slice(0, 10)}...{d.contract_address.slice(-8)}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {d.label || "—"}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(d.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link href={`/agreements/${d.contract_address}`}>
+                        <Button variant="ghost" size="sm">
+                          View <ExternalLink className="ml-1 h-3 w-3" />
+                        </Button>
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Table */}
       <Card>

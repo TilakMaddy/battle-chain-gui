@@ -31,6 +31,7 @@ import {
 } from "@/lib/contracts/types";
 import { BATTLECHAIN_CAIP2 } from "@/lib/contracts/addresses";
 import { toast } from "sonner";
+import { ContractPicker } from "@/components/web3/contract-picker";
 import {
   Loader2,
   CheckCircle,
@@ -316,30 +317,24 @@ function CreateAgreementContent() {
             <CardTitle>Scope Configuration</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Asset Recovery Address</Label>
-              <Input
-                placeholder="0x..."
-                value={form.assetRecoveryAddress}
-                onChange={(e) => update("assetRecoveryAddress", e.target.value)}
-                className="font-mono"
-              />
-            </div>
+            <ContractPicker
+              label="Asset Recovery Address"
+              value={form.assetRecoveryAddress}
+              onChange={(addr) => update("assetRecoveryAddress", addr)}
+            />
             <Separator />
             <Label className="text-base font-semibold">In-Scope Contracts</Label>
             {form.accounts.map((acc, i) => (
               <div key={i} className="flex gap-3 items-end">
-                <div className="flex-1 space-y-2">
-                  <Label>Contract Address</Label>
-                  <Input
-                    placeholder="0x..."
+                <div className="flex-1">
+                  <ContractPicker
+                    label="Contract Address"
                     value={acc.accountAddress}
-                    onChange={(e) => {
+                    onChange={(addr) => {
                       const accounts = [...form.accounts];
-                      accounts[i] = { ...accounts[i], accountAddress: e.target.value };
+                      accounts[i] = { ...accounts[i], accountAddress: addr };
                       update("accounts", accounts);
                     }}
-                    className="font-mono"
                   />
                 </div>
                 <div className="w-64 space-y-2">
@@ -557,16 +552,16 @@ function CreateAgreementContent() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Enter the agreement address from the creation transaction to complete the setup (extend commitment window + adopt Safe Harbor).
+              Select or enter the agreement address from the creation transaction to complete the setup (extend commitment window + adopt Safe Harbor).
             </p>
-            <Input
-              placeholder="0x... (agreement address from TX receipt)"
-              onChange={(e) => {
-                if (e.target.value.startsWith("0x") && e.target.value.length === 42) {
-                  setAgreementAddr(e.target.value);
+            <ContractPicker
+              label="Agreement Address"
+              value={agreementAddr === "pending" ? "" : agreementAddr}
+              onChange={(addr) => {
+                if (addr.startsWith("0x") && addr.length === 42) {
+                  setAgreementAddr(addr);
                 }
               }}
-              className="font-mono"
             />
             <Button
               onClick={handlePostCreate}

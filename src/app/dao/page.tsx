@@ -17,6 +17,7 @@ import {
 } from "@/lib/hooks/use-attack-registry";
 import { CONTRACTS } from "@/lib/contracts/addresses";
 import { ContractState } from "@/lib/contracts/types";
+import { ContractPicker } from "@/components/web3/contract-picker";
 import {
   Vote,
   CheckCircle,
@@ -44,6 +45,14 @@ function DaoReviewContent() {
   const publicClient = usePublicClient();
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [manualAddress, setManualAddress] = useState("");
+
+  const { approve: manualApprove, isPending: manualApprovePending } = useApproveAttack();
+  const { reject: manualReject, isPending: manualRejectPending } = useRejectAttack();
+  const { promote: manualPromote, isPending: manualPromotePending } = usePromote();
+
+  const manualValid = manualAddress.startsWith("0x") && manualAddress.length === 42;
+  const manualBusy = manualApprovePending || manualRejectPending || manualPromotePending;
 
   useEffect(() => {
     async function fetch() {
@@ -88,6 +97,50 @@ function DaoReviewContent() {
         title="DAO Review"
         description="Review and approve or reject attack mode requests"
       />
+
+      {/* Manual Review by Contract */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-purple-500" />
+            Review a Contract
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <ContractPicker
+            label="Agreement Address"
+            value={manualAddress}
+            onChange={setManualAddress}
+            placeholder="0x... agreement address"
+          />
+          <div className="flex gap-3">
+            <Button
+              onClick={() => manualApprove(manualAddress as `0x${string}`)}
+              disabled={!manualValid || manualBusy}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {manualApprovePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <CheckCircle className="mr-2 h-4 w-4" /> Approve
+            </Button>
+            <Button
+              onClick={() => manualReject(manualAddress as `0x${string}`)}
+              disabled={!manualValid || manualBusy}
+              variant="destructive"
+            >
+              {manualRejectPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <XCircle className="mr-2 h-4 w-4" /> Reject
+            </Button>
+            <Button
+              onClick={() => manualPromote(manualAddress as `0x${string}`)}
+              disabled={!manualValid || manualBusy}
+              variant="outline"
+            >
+              {manualPromotePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              <TrendingUp className="mr-2 h-4 w-4" /> Promote
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {loading ? (
         <div className="space-y-3">

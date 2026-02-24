@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local db
+battlechain.db
+battlechain.db-shm
+battlechain.db-wal

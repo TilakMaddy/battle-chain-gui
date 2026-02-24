@@ -13,10 +13,13 @@ import { useAgreementDetails } from "@/lib/hooks/use-agreement";
 import {
   usePromote,
   useCancelPromotion,
+  useRequestPromotion,
   useAgreementState,
+  useAgreementStatePolling,
 } from "@/lib/hooks/use-attack-registry";
 import { CONTRACTS } from "@/lib/contracts/addresses";
-import { ContractState } from "@/lib/contracts/types";
+import { ContractState, CONTRACT_STATE_LABELS } from "@/lib/contracts/types";
+import { ContractPicker } from "@/components/web3/contract-picker";
 import {
   TrendingUp,
   Timer,
@@ -45,6 +48,13 @@ function PromotionContent() {
   const publicClient = usePublicClient();
   const [items, setItems] = useState<PromotionItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pickAddress, setPickAddress] = useState("");
+  const { requestPromotion, isPending: requestPending } = useRequestPromotion();
+
+  const pickValid = pickAddress.startsWith("0x") && pickAddress.length === 42;
+  const { state: pickState } = useAgreementStatePolling(
+    pickValid ? (pickAddress as `0x${string}`) : undefined
+  );
 
   useEffect(() => {
     async function fetch() {
@@ -85,6 +95,42 @@ function PromotionContent() {
         title="Promotion Tracker"
         description="Track active promotions with live countdown timers"
       />
+
+      {/* Request Promotion */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-purple-500" />
+            Request Promotion
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Select a deployed contract to request promotion to production.
+          </p>
+          <ContractPicker
+            label="Contract Address"
+            value={pickAddress}
+            onChange={setPickAddress}
+            placeholder="0x... agreement address"
+          />
+          {pickState !== undefined && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Current state:</span>
+              <StateBadge state={pickState} />
+              <span className="text-sm text-muted-foreground">{CONTRACT_STATE_LABELS[pickState]}</span>
+            </div>
+          )}
+          <Button
+            onClick={() => requestPromotion(pickAddress as `0x${string}`)}
+            disabled={!pickValid || requestPending}
+            className="w-full bg-purple-600 hover:bg-purple-700"
+          >
+            {requestPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Request Promotion
+          </Button>
+        </CardContent>
+      </Card>
 
       {loading ? (
         <div className="space-y-3">
