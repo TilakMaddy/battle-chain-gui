@@ -22,7 +22,6 @@ import {
   CheckCircle,
   XCircle,
   Timer,
-  Inbox,
   Layers,
   ListChecks,
   ExternalLink,
@@ -110,24 +109,6 @@ interface ChainHealth {
   sequencerNonceGap: number;
 }
 
-interface MempoolTx {
-  hash: string;
-  from: string;
-  to: string | null;
-  value: bigint;
-  nonce: number;
-  gas: number;
-  maxFeePerGas: string | null;
-  maxPriorityFeePerGas: string | null;
-  gasPrice: string | null;
-  input: string;
-}
-
-interface TxpoolStatus {
-  pending: number;
-  queued: number;
-}
-
 interface TxLookup {
   hash: string;
   status: "pending" | "mined" | "failed" | "not_found" | "loading";
@@ -175,191 +156,6 @@ interface RecentTx {
   gasPrice: string | null;
   timestamp: number;
   index: number;
-}
-
-// ---------------------------------------------------------------------------
-// Mempool fetcher — tries multiple approaches
-// ---------------------------------------------------------------------------
-
-function parseTxObject(tx: Record<string, string>): MempoolTx {
-  return {
-    hash: tx.hash,
-    from: tx.from,
-    to: tx.to || null,
-    value: tx.value ? hexToBigInt(tx.value) : 0n,
-    nonce: hexToNumber(tx.nonce),
-    gas: hexToNumber(tx.gas),
-    maxFeePerGas: tx.maxFeePerGas ?? null,
-    maxPriorityFeePerGas: tx.maxPriorityFeePerGas ?? null,
-    gasPrice: tx.gasPrice ?? null,
-    input: tx.input ?? "0x",
-  };
-}
-
-async function fetchMempoolTxs(): Promise<{
-  txs: MempoolTx[];
-  txpoolStatus: TxpoolStatus | null;
-  stuckCount: number;
-  source: string;
-}> {
-  let txpoolStatus: TxpoolStatus | null = null;
-
-  // 1. Try txpool_status for counts
-  try {
-    const status = await rpc("txpool_status");
-    txpoolStatus = {
-      pending: hexToNumber(status.pending),
-      queued: hexToNumber(status.queued),
-    };
-  } catch {
-    // Node may not support txpool namespace
-  }
-
-  // 2. Try txpool_content for full mempool dump
-  try {
-    const content = await rpc("txpool_content");
-    const txs: MempoolTx[] = [];
-
-    for (const bucket of [content.pending, content.queued]) {
-      if (!bucket) continue;
-      for (const senderTxs of Object.values(bucket)) {
-        for (const tx of Object.values(
-          senderTxs as Record<string, Record<string, string>>
-        )) {
-          txs.push(parseTxObject(tx));
-        }
-      }
-    }
-
-    if (txs.length > 0 || txpoolStatus) {
-      return { txs, txpoolStatus, stuckCount: txs.length, source: "txpool_content" };
-    }
-  } catch {
-    // txpool_content not supported, fall through
-  }
-
-  // 3. Compute global stuck count from pending vs latest block tx count.
-  //    On ZKSync nodes where txpool is unavailable, the nonce gap from
-  //    eth_getBlockTransactionCountByNumber gives us a real stuck count.
-  let globalStuck = 0;
-  try {
-    const [pendingCountHex, latestCountHex] = await Promise.all([
-      rpc("eth_getBlockTransactionCountByNumber", ["pending"]),
-      rpc("eth_getBlockTransactionCountByNumber", ["latest"]),
-    ]);
-    const pendingCount = hexToNumber(pendingCountHex);
-    const latestCount = hexToNumber(latestCountHex);
-    // pending block includes already-mined txs + mempool txs
-    globalStuck = Math.max(0, pendingCount - latestCount);
-  } catch {
-    // ignore
-  }
-
-  // 4. Probe pending block by index, filtering out already-mined txs
-  try {
-    const latestBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
-    const minedHashes = new Set<string>(latestBlock?.transactions ?? []);
-
-    const txs: MempoolTx[] = [];
-    const MAX_SCAN = 200;
-    for (let i = 0; i < MAX_SCAN; i++) {
-      const tx = await rpc("eth_getTransactionByBlockNumberAndIndex", [
-        "pending",
-        "0x" + i.toString(16),
-      ]);
-      if (!tx) break;
-      // Skip txs that are already mined in the latest block
-      if (minedHashes.has(tx.hash)) continue;
-      txs.push(parseTxObject(tx));
-    }
-    if (txs.length > 0) {
-      return {
-        txs,
-        txpoolStatus,
-        stuckCount: Math.max(globalStuck, txs.length),
-        source: "pending_block_index_scan",
-      };
-    }
-  } catch {
-    // not supported, fall through
-  }
-
-  // 5. If we detected a stuck count > 0 from step 3 but found no enumerable txs,
-  //    report the count honestly
-  if (globalStuck > 0) {
-    return {
-      txs: [],
-      txpoolStatus,
-      stuckCount: globalStuck,
-      source: "nonce_gap_detected",
-    };
-  }
-
-  return { txs: [], txpoolStatus, stuckCount: 0, source: "none" };
-}
-
-// ---------------------------------------------------------------------------
-// Per-address stuck tx scanner — discovers actual tx hashes from nonce gap
-// ---------------------------------------------------------------------------
-
-async function scanAddressStuckTxs(
-  address: string
-): Promise<{ txs: MempoolTx[]; confirmed: number; pending: number }> {
-  const [confirmedHex, pendingHex] = await Promise.all([
-    rpc("eth_getTransactionCount", [address, "latest"]),
-    rpc("eth_getTransactionCount", [address, "pending"]),
-  ]);
-  const confirmed = hexToNumber(confirmedHex);
-  const pending = hexToNumber(pendingHex);
-
-  if (pending <= confirmed) {
-    return { txs: [], confirmed, pending };
-  }
-
-  // The node knows about txs with nonces [confirmed .. pending-1].
-  // We can't query by sender+nonce directly, but we CAN get the pending block
-  // with full tx objects and filter by sender.
-  const txs: MempoolTx[] = [];
-
-  try {
-    const pendingBlock = await rpc("eth_getBlockByNumber", ["pending", true]);
-    const pendingTxObjects = pendingBlock?.transactions ?? [];
-    const addrLower = address.toLowerCase();
-
-    for (const tx of pendingTxObjects) {
-      if (typeof tx === "string") continue; // hash-only, skip
-      if (tx.from?.toLowerCase() === addrLower && tx.blockHash === null) {
-        txs.push(parseTxObject(tx));
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  // Also scan by index to catch txs the pending block might expose
-  try {
-    const addrLower = address.toLowerCase();
-    const seen = new Set(txs.map((t) => t.hash));
-    for (let i = 0; i < 300; i++) {
-      const tx = await rpc("eth_getTransactionByBlockNumberAndIndex", [
-        "pending",
-        "0x" + i.toString(16),
-      ]);
-      if (!tx) break;
-      if (
-        tx.from?.toLowerCase() === addrLower &&
-        !seen.has(tx.hash) &&
-        tx.blockHash === null
-      ) {
-        txs.push(parseTxObject(tx));
-        seen.add(tx.hash);
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  return { txs, confirmed, pending };
 }
 
 // ---------------------------------------------------------------------------
@@ -496,23 +292,6 @@ export default function StatusPage() {
   });
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Mempool
-  const [mempoolTxs, setMempoolTxs] = useState<MempoolTx[]>([]);
-  const [txpoolStatus, setTxpoolStatus] = useState<TxpoolStatus | null>(null);
-  const [mempoolSource, setMempoolSource] = useState("loading");
-  const [mempoolLoading, setMempoolLoading] = useState(true);
-  const [globalStuckCount, setGlobalStuckCount] = useState(0);
-
-  // Address mempool scanner
-  const [mempoolScanAddr, setMempoolScanAddr] = useState("");
-  const [mempoolScanResult, setMempoolScanResult] = useState<{
-    txs: MempoolTx[];
-    confirmed: number;
-    pending: number;
-    stuck: number;
-  } | null>(null);
-  const [mempoolScanLoading, setMempoolScanLoading] = useState(false);
 
   // Tx lookup
   const [txInput, setTxInput] = useState("");
@@ -696,39 +475,6 @@ export default function StatusPage() {
     }
   }, []);
 
-  const fetchMempool = useCallback(async () => {
-    setMempoolLoading(true);
-    try {
-      const result = await fetchMempoolTxs();
-      setMempoolTxs(result.txs);
-      setTxpoolStatus(result.txpoolStatus);
-      setMempoolSource(result.source);
-      setGlobalStuckCount(result.stuckCount);
-    } catch {
-      setMempoolSource("error");
-    } finally {
-      setMempoolLoading(false);
-    }
-  }, []);
-
-  const runMempoolScan = async () => {
-    const addr = mempoolScanAddr.trim();
-    if (!addr.startsWith("0x") || addr.length !== 42) return;
-    setMempoolScanLoading(true);
-    setMempoolScanResult(null);
-    try {
-      const result = await scanAddressStuckTxs(addr);
-      setMempoolScanResult({
-        ...result,
-        stuck: result.pending - result.confirmed,
-      });
-    } catch {
-      setMempoolScanResult(null);
-    } finally {
-      setMempoolScanLoading(false);
-    }
-  };
-
   const fetchBlocks = useCallback(async (latestNum?: number) => {
     setRecentBlocksLoading(true);
     try {
@@ -807,11 +553,9 @@ export default function StatusPage() {
 
   useEffect(() => {
     fetchHealth();
-    fetchMempool();
     fetchBlocks();
     runLatencyProbe();
     const healthInterval = setInterval(fetchHealth, 10_000);
-    const mempoolInterval = setInterval(fetchMempool, 12_000);
     const latencyInterval = setInterval(runLatencyProbe, 15_000);
     const pulseInterval = setInterval(() => {
       pulseRef.current++;
@@ -819,11 +563,10 @@ export default function StatusPage() {
     }, 1000);
     return () => {
       clearInterval(healthInterval);
-      clearInterval(mempoolInterval);
       clearInterval(latencyInterval);
       clearInterval(pulseInterval);
     };
-  }, [fetchHealth, fetchMempool, fetchBlocks, runLatencyProbe]);
+  }, [fetchHealth, fetchBlocks, runLatencyProbe]);
 
   // Re-fetch blocks whenever latest block changes
   useEffect(() => {
@@ -1066,10 +809,7 @@ export default function StatusPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              fetchHealth();
-              fetchMempool();
-            }}
+            onClick={fetchHealth}
             disabled={refreshing}
           >
             <RefreshCw
@@ -1249,330 +989,6 @@ export default function StatusPage() {
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* MEMPOOL VIEWER                                                      */}
-      {/* ------------------------------------------------------------------ */}
-      <Card
-        className={
-          mempoolTxs.length > 0 || globalStuckCount > 0
-            ? "border-yellow-500/30 bg-yellow-500/5"
-            : ""
-        }
-      >
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Inbox className="h-5 w-5" />
-              Mempool
-              {(mempoolTxs.length > 0 || globalStuckCount > 0) && (
-                <Badge
-                  variant="outline"
-                  className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse ml-1"
-                >
-                  {mempoolTxs.length > 0
-                    ? `${mempoolTxs.length} visible`
-                    : `${globalStuckCount} stuck`}
-                </Badge>
-              )}
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              {txpoolStatus && (
-                <div className="flex gap-3 text-xs text-muted-foreground">
-                  <span>
-                    Pending:{" "}
-                    <span className="font-mono font-medium text-yellow-400">
-                      {txpoolStatus.pending}
-                    </span>
-                  </span>
-                  <span>
-                    Queued:{" "}
-                    <span className="font-mono font-medium text-orange-400">
-                      {txpoolStatus.queued}
-                    </span>
-                  </span>
-                </div>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={fetchMempool}
-                disabled={mempoolLoading}
-              >
-                <RefreshCw
-                  className={`h-3.5 w-3.5 ${mempoolLoading ? "animate-spin" : ""}`}
-                />
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {mempoolLoading && mempoolTxs.length === 0 ? (
-            <div className="space-y-2">
-              {[...Array(3)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : mempoolTxs.length === 0 ? (
-            <div className="text-center py-8">
-              {mempoolSource === "nonce_gap_detected" ? (
-                <>
-                  <AlertTriangle className="h-10 w-10 text-red-500/60 mx-auto mb-2" />
-                  <p className="text-sm text-red-300">
-                    {globalStuckCount} stuck transaction{globalStuckCount !== 1 ? "s" : ""} detected
-                    via nonce gap analysis.
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    The RPC node does not support txpool methods and its pending block is stale.
-                    Enter a wallet address below to scan for that address&apos;s stuck transactions.
-                  </p>
-                </>
-              ) : mempoolSource === "pending_block_stale" ||
-              mempoolSource === "pending_count_only" ? (
-                <>
-                  <AlertTriangle className="h-10 w-10 text-yellow-500/60 mx-auto mb-2" />
-                  <p className="text-sm text-yellow-300">
-                    {txpoolStatus
-                      ? `${txpoolStatus.pending} pending + ${txpoolStatus.queued} queued transactions detected, but the RPC node does not expose individual transaction data.`
-                      : "Pending transactions detected, but the RPC node does not expose individual transaction data."}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Enter a wallet address below to scan for stuck transactions.
-                  </p>
-                </>
-              ) : mempoolSource === "none" || mempoolSource === "error" ? (
-                <>
-                  <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    Could not query mempool. The RPC node may not expose txpool or pending block data.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    Mempool is empty. No pending transactions.
-                  </p>
-                </>
-              )}
-              {mempoolSource !== "none" && mempoolSource !== "error" && (
-                <p className="text-[10px] text-muted-foreground/50 mt-2">
-                  Source: {mempoolSource}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {/* Header row */}
-              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
-                <div className="col-span-3">Tx Hash</div>
-                <div className="col-span-3">From</div>
-                <div className="col-span-2">To</div>
-                <div className="col-span-1 text-right">Nonce</div>
-                <div className="col-span-1 text-right">Value</div>
-                <div className="col-span-1 text-right">Gas</div>
-                <div className="col-span-1 text-right">Fee</div>
-              </div>
-              <Separator />
-
-              {/* Tx rows */}
-              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
-                {mempoolTxs.map((tx) => {
-                  const isContractDeploy = !tx.to;
-                  return (
-                    <div
-                      key={tx.hash}
-                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors group"
-                    >
-                      <div className="col-span-3 flex items-center gap-1.5">
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse shrink-0" />
-                        <a
-                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="truncate hover:text-blue-400 hover:underline transition-colors"
-                          title={tx.hash}
-                        >
-                          {truncateHash(tx.hash, 8)}
-                        </a>
-                      </div>
-                      <div
-                        className="col-span-3 truncate text-muted-foreground"
-                        title={tx.from}
-                      >
-                        <a
-                          href={`${EXPLORER_URL}/address/${tx.from}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                        >
-                          {truncateHash(tx.from)}
-                        </a>
-                      </div>
-                      <div
-                        className="col-span-2 truncate text-muted-foreground"
-                        title={tx.to ?? "Contract Creation"}
-                      >
-                        {isContractDeploy ? (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] py-0 px-1 bg-blue-500/10 text-blue-400 border-blue-500/30"
-                          >
-                            CREATE
-                          </Badge>
-                        ) : (
-                          <a
-                            href={`${EXPLORER_URL}/address/${tx.to}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-blue-400 hover:underline transition-colors"
-                          >
-                            {truncateHash(tx.to!)}
-                          </a>
-                        )}
-                      </div>
-                      <div className="col-span-1 text-right text-muted-foreground">
-                        {tx.nonce}
-                      </div>
-                      <div className="col-span-1 text-right">
-                        {formatEth(tx.value)}
-                      </div>
-                      <div className="col-span-1 text-right text-muted-foreground">
-                        {(tx.gas / 1000).toFixed(0)}k
-                      </div>
-                      <div className="col-span-1 text-right text-muted-foreground">
-                        {tx.maxFeePerGas
-                          ? formatGwei(tx.maxFeePerGas)
-                          : tx.gasPrice
-                            ? formatGwei(tx.gasPrice)
-                            : "—"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <Separator />
-              <div className="flex items-center justify-between px-3 pt-2 text-[10px] text-muted-foreground">
-                <span>
-                  {mempoolTxs.length} transaction
-                  {mempoolTxs.length !== 1 ? "s" : ""} in mempool
-                </span>
-                <span>
-                  via{" "}
-                  {mempoolSource === "txpool_content"
-                    ? "txpool_content"
-                    : mempoolSource === "pending_block_index_scan"
-                      ? "eth_getTransactionByBlockNumberAndIndex(pending)"
-                      : mempoolSource === "pending_block"
-                        ? "eth_getBlockByNumber(pending)"
-                        : mempoolSource === "nonce_gap_detected"
-                          ? "eth_getTransactionCount(pending) nonce gap"
-                          : mempoolSource}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Address mempool scanner */}
-          <div className="mt-4 pt-4 border-t border-border/50">
-            <p className="text-sm font-medium mb-1">Scan Address for Stuck Transactions</p>
-            <p className="text-xs text-muted-foreground mb-3">
-              Enter a wallet address to detect its stuck transactions via nonce gap analysis
-              and enumerate any visible pending txs.
-            </p>
-            <div className="flex gap-2">
-              <Input
-                placeholder="0x... wallet address"
-                value={mempoolScanAddr}
-                onChange={(e) => setMempoolScanAddr(e.target.value)}
-                className="font-mono text-sm"
-                onKeyDown={(e) => e.key === "Enter" && runMempoolScan()}
-              />
-              <Button
-                onClick={runMempoolScan}
-                disabled={
-                  !mempoolScanAddr.startsWith("0x") ||
-                  mempoolScanAddr.length !== 42 ||
-                  mempoolScanLoading
-                }
-                variant="outline"
-              >
-                {mempoolScanLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Search className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-
-            {mempoolScanResult && (
-              <div className="mt-3 space-y-3">
-                <div className="grid grid-cols-3 gap-2">
-                  <NonceStat label="Confirmed" value={mempoolScanResult.confirmed} />
-                  <NonceStat label="Pending" value={mempoolScanResult.pending} />
-                  <NonceStat
-                    label="Stuck"
-                    value={mempoolScanResult.stuck}
-                    variant={mempoolScanResult.stuck > 0 ? "danger" : "success"}
-                  />
-                </div>
-
-                {mempoolScanResult.stuck > 0 && mempoolScanResult.txs.length === 0 && (
-                  <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-sm text-yellow-300">
-                    {mempoolScanResult.stuck} transaction
-                    {mempoolScanResult.stuck !== 1 ? "s are" : " is"} stuck in the mempool
-                    (nonces {mempoolScanResult.confirmed} through {mempoolScanResult.pending - 1}).
-                    The RPC node does not expose individual pending transaction data for enumeration.
-                  </div>
-                )}
-
-                {mempoolScanResult.stuck === 0 && (
-                  <div className="rounded-md border border-green-500/30 bg-green-500/5 p-3 text-sm text-green-300">
-                    No stuck transactions for this address.
-                  </div>
-                )}
-
-                {mempoolScanResult.txs.length > 0 && (
-                  <div className="space-y-0.5 max-h-[300px] overflow-y-auto">
-                    {mempoolScanResult.txs.map((tx) => (
-                      <div
-                        key={tx.hash}
-                        className="flex items-center gap-3 rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
-                      >
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse shrink-0" />
-                        <a
-                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="truncate hover:text-blue-400 hover:underline transition-colors"
-                          title={tx.hash}
-                        >
-                          {truncateHash(tx.hash, 10)}
-                        </a>
-                        <span className="text-muted-foreground">nonce:{tx.nonce}</span>
-                        <span className="text-muted-foreground">
-                          {tx.to ? (
-                            <a
-                              href={`${EXPLORER_URL}/address/${tx.to}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="hover:text-blue-400 hover:underline transition-colors"
-                            >
-                              {truncateHash(tx.to)}
-                            </a>
-                          ) : "CREATE"}
-                        </span>
-                        <span className="ml-auto">{formatEth(tx.value)} ETH</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ------------------------------------------------------------------ */}
       {/* Node Status                                                         */}
       {/* ------------------------------------------------------------------ */}
       <Card>
@@ -1640,265 +1056,6 @@ export default function StatusPage() {
               <p className="font-medium">
                 {formatGwei(health.blockInfo.baseFeePerGas)} Gwei
               </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Recent Blocks                                                        */}
-      {/* ------------------------------------------------------------------ */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5" />
-              Recent Blocks
-            </CardTitle>
-            <Badge variant="outline" className="text-xs font-mono">
-              {recentBlocks.length > 0
-                ? `#${recentBlocks[recentBlocks.length - 1]?.number} — #${recentBlocks[0]?.number}`
-                : "—"}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {recentBlocksLoading && recentBlocks.length === 0 ? (
-            <div className="space-y-2">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : recentBlocks.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              No blocks found.
-            </p>
-          ) : (
-            <div className="space-y-0.5">
-              {/* Header */}
-              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
-                <div className="col-span-2">Block</div>
-                <div className="col-span-3">Hash</div>
-                <div className="col-span-2">Age</div>
-                <div className="col-span-1 text-right">Txs</div>
-                <div className="col-span-2 text-right">Gas</div>
-                <div className="col-span-2 text-right">Block Time</div>
-              </div>
-              <Separator />
-              <div className="max-h-[340px] overflow-y-auto space-y-0.5">
-                {recentBlocks.map((block) => {
-                  const now = Math.floor(Date.now() / 1000);
-                  const age = now - block.timestamp;
-                  const gasPercent = (
-                    (block.gasUsed / block.gasLimit) *
-                    100
-                  ).toFixed(1);
-                  return (
-                    <div
-                      key={block.number}
-                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="col-span-2 font-bold">
-                        <a
-                          href={`${EXPLORER_URL}/block/${block.number}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                        >
-                          #{block.number}
-                        </a>
-                      </div>
-                      <div
-                        className="col-span-3 text-muted-foreground truncate"
-                        title={block.hash}
-                      >
-                        <a
-                          href={`${EXPLORER_URL}/block/${block.number}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                        >
-                          {truncateHash(block.hash, 8)}
-                        </a>
-                      </div>
-                      <div className="col-span-2 text-muted-foreground">
-                        {formatAge(age)}
-                      </div>
-                      <div className="col-span-1 text-right">
-                        {block.txCount > 0 ? (
-                          <a
-                            href={`${EXPLORER_URL}/block/${block.number}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-foreground hover:text-blue-400 hover:underline transition-colors"
-                          >
-                            {block.txCount}
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground/50">0</span>
-                        )}
-                      </div>
-                      <div className="col-span-2 text-right">
-                        <div className="flex items-center gap-1.5 justify-end">
-                          <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-blue-500"
-                              style={{
-                                width: `${Math.min(100, parseFloat(gasPercent))}%`,
-                              }}
-                            />
-                          </div>
-                          <span className="text-muted-foreground w-10 text-right">
-                            {gasPercent}%
-                          </span>
-                        </div>
-                      </div>
-                      <div className="col-span-2 text-right text-muted-foreground">
-                        {block.timeSincePrev !== null ? (
-                          <span
-                            className={
-                              block.timeSincePrev > 30
-                                ? "text-yellow-400"
-                                : ""
-                            }
-                          >
-                            {block.timeSincePrev}s
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Recent Transactions                                                  */}
-      {/* ------------------------------------------------------------------ */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <ListChecks className="h-5 w-5" />
-              Recent Transactions
-            </CardTitle>
-            {recentTxs.length > 0 && (
-              <Badge variant="outline" className="text-xs font-mono">
-                {recentTxs.length} txs
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {recentTxsLoading && recentTxs.length === 0 ? (
-            <div className="space-y-2">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : recentTxs.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              No transactions found in recent blocks.
-            </p>
-          ) : (
-            <div className="space-y-0.5">
-              {/* Header */}
-              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
-                <div className="col-span-3">Tx Hash</div>
-                <div className="col-span-2">From</div>
-                <div className="col-span-2">To</div>
-                <div className="col-span-1 text-right">Value</div>
-                <div className="col-span-1 text-right">Block</div>
-                <div className="col-span-1 text-right">Nonce</div>
-                <div className="col-span-2 text-right">Age</div>
-              </div>
-              <Separator />
-              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
-                {recentTxs.map((tx) => {
-                  const now = Math.floor(Date.now() / 1000);
-                  const age = now - tx.timestamp;
-                  const isCreate = !tx.to;
-                  const value = tx.value ? parseInt(tx.value, 16) : 0;
-                  const ethValue = value / 1e18;
-                  return (
-                    <div
-                      key={`${tx.hash}-${tx.index}`}
-                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="col-span-3 truncate">
-                        <a
-                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                          title={tx.hash}
-                        >
-                          {truncateHash(tx.hash, 8)}
-                        </a>
-                      </div>
-                      <div className="col-span-2 truncate text-muted-foreground">
-                        <a
-                          href={`${EXPLORER_URL}/address/${tx.from}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                          title={tx.from}
-                        >
-                          {truncateHash(tx.from)}
-                        </a>
-                      </div>
-                      <div className="col-span-2 truncate text-muted-foreground">
-                        {isCreate ? (
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] py-0 px-1 bg-blue-500/10 text-blue-400 border-blue-500/30"
-                          >
-                            CREATE
-                          </Badge>
-                        ) : (
-                          <a
-                            href={`${EXPLORER_URL}/address/${tx.to}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-blue-400 hover:underline transition-colors"
-                            title={tx.to!}
-                          >
-                            {truncateHash(tx.to!)}
-                          </a>
-                        )}
-                      </div>
-                      <div className="col-span-1 text-right">
-                        {ethValue > 0 ? (
-                          <span className="text-foreground">{ethValue < 0.001 ? "<0.001" : ethValue.toFixed(3)}</span>
-                        ) : (
-                          <span className="text-muted-foreground/50">0</span>
-                        )}
-                      </div>
-                      <div className="col-span-1 text-right">
-                        <a
-                          href={`${EXPLORER_URL}/block/${tx.blockNumber}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:text-blue-400 hover:underline transition-colors"
-                        >
-                          #{tx.blockNumber}
-                        </a>
-                      </div>
-                      <div className="col-span-1 text-right text-muted-foreground">
-                        {tx.nonce}
-                      </div>
-                      <div className="col-span-2 text-right text-muted-foreground">
-                        {formatAge(age)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           )}
         </CardContent>
@@ -2411,6 +1568,265 @@ export default function StatusPage() {
                           {truncateHash(r.from)}
                         </span>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Recent Blocks                                                        */}
+      {/* ------------------------------------------------------------------ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5" />
+              Recent Blocks
+            </CardTitle>
+            <Badge variant="outline" className="text-xs font-mono">
+              {recentBlocks.length > 0
+                ? `#${recentBlocks[recentBlocks.length - 1]?.number} — #${recentBlocks[0]?.number}`
+                : "—"}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recentBlocksLoading && recentBlocks.length === 0 ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : recentBlocks.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No blocks found.
+            </p>
+          ) : (
+            <div className="space-y-0.5">
+              {/* Header */}
+              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
+                <div className="col-span-2">Block</div>
+                <div className="col-span-3">Hash</div>
+                <div className="col-span-2">Age</div>
+                <div className="col-span-1 text-right">Txs</div>
+                <div className="col-span-2 text-right">Gas</div>
+                <div className="col-span-2 text-right">Block Time</div>
+              </div>
+              <Separator />
+              <div className="max-h-[340px] overflow-y-auto space-y-0.5">
+                {recentBlocks.map((block) => {
+                  const now = Math.floor(Date.now() / 1000);
+                  const age = now - block.timestamp;
+                  const gasPercent = (
+                    (block.gasUsed / block.gasLimit) *
+                    100
+                  ).toFixed(1);
+                  return (
+                    <div
+                      key={block.number}
+                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="col-span-2 font-bold">
+                        <a
+                          href={`${EXPLORER_URL}/block/${block.number}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          #{block.number}
+                        </a>
+                      </div>
+                      <div
+                        className="col-span-3 text-muted-foreground truncate"
+                        title={block.hash}
+                      >
+                        <a
+                          href={`${EXPLORER_URL}/block/${block.number}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          {truncateHash(block.hash, 8)}
+                        </a>
+                      </div>
+                      <div className="col-span-2 text-muted-foreground">
+                        {formatAge(age)}
+                      </div>
+                      <div className="col-span-1 text-right">
+                        {block.txCount > 0 ? (
+                          <a
+                            href={`${EXPLORER_URL}/block/${block.number}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-foreground hover:text-blue-400 hover:underline transition-colors"
+                          >
+                            {block.txCount}
+                          </a>
+                        ) : (
+                          <span className="text-muted-foreground/50">0</span>
+                        )}
+                      </div>
+                      <div className="col-span-2 text-right">
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-blue-500"
+                              style={{
+                                width: `${Math.min(100, parseFloat(gasPercent))}%`,
+                              }}
+                            />
+                          </div>
+                          <span className="text-muted-foreground w-10 text-right">
+                            {gasPercent}%
+                          </span>
+                        </div>
+                      </div>
+                      <div className="col-span-2 text-right text-muted-foreground">
+                        {block.timeSincePrev !== null ? (
+                          <span
+                            className={
+                              block.timeSincePrev > 30
+                                ? "text-yellow-400"
+                                : ""
+                            }
+                          >
+                            {block.timeSincePrev}s
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Recent Transactions                                                  */}
+      {/* ------------------------------------------------------------------ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="h-5 w-5" />
+              Recent Transactions
+            </CardTitle>
+            {recentTxs.length > 0 && (
+              <Badge variant="outline" className="text-xs font-mono">
+                {recentTxs.length} txs
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recentTxsLoading && recentTxs.length === 0 ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : recentTxs.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No transactions found in recent blocks.
+            </p>
+          ) : (
+            <div className="space-y-0.5">
+              {/* Header */}
+              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
+                <div className="col-span-3">Tx Hash</div>
+                <div className="col-span-2">From</div>
+                <div className="col-span-2">To</div>
+                <div className="col-span-1 text-right">Value</div>
+                <div className="col-span-1 text-right">Block</div>
+                <div className="col-span-1 text-right">Nonce</div>
+                <div className="col-span-2 text-right">Age</div>
+              </div>
+              <Separator />
+              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
+                {recentTxs.map((tx) => {
+                  const now = Math.floor(Date.now() / 1000);
+                  const age = now - tx.timestamp;
+                  const isCreate = !tx.to;
+                  const value = tx.value ? parseInt(tx.value, 16) : 0;
+                  const ethValue = value / 1e18;
+                  return (
+                    <div
+                      key={`${tx.hash}-${tx.index}`}
+                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="col-span-3 truncate">
+                        <a
+                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                          title={tx.hash}
+                        >
+                          {truncateHash(tx.hash, 8)}
+                        </a>
+                      </div>
+                      <div className="col-span-2 truncate text-muted-foreground">
+                        <a
+                          href={`${EXPLORER_URL}/address/${tx.from}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                          title={tx.from}
+                        >
+                          {truncateHash(tx.from)}
+                        </a>
+                      </div>
+                      <div className="col-span-2 truncate text-muted-foreground">
+                        {isCreate ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] py-0 px-1 bg-blue-500/10 text-blue-400 border-blue-500/30"
+                          >
+                            CREATE
+                          </Badge>
+                        ) : (
+                          <a
+                            href={`${EXPLORER_URL}/address/${tx.to}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-blue-400 hover:underline transition-colors"
+                            title={tx.to!}
+                          >
+                            {truncateHash(tx.to!)}
+                          </a>
+                        )}
+                      </div>
+                      <div className="col-span-1 text-right">
+                        {ethValue > 0 ? (
+                          <span className="text-foreground">{ethValue < 0.001 ? "<0.001" : ethValue.toFixed(3)}</span>
+                        ) : (
+                          <span className="text-muted-foreground/50">0</span>
+                        )}
+                      </div>
+                      <div className="col-span-1 text-right">
+                        <a
+                          href={`${EXPLORER_URL}/block/${tx.blockNumber}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          #{tx.blockNumber}
+                        </a>
+                      </div>
+                      <div className="col-span-1 text-right text-muted-foreground">
+                        {tx.nonce}
+                      </div>
+                      <div className="col-span-2 text-right text-muted-foreground">
+                        {formatAge(age)}
+                      </div>
                     </div>
                   );
                 })}
