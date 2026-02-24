@@ -11,6 +11,7 @@ import {
   Swords,
   Vote,
   TrendingUp,
+  Activity,
 } from "lucide-react";
 
 const navItems = [
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/attack", label: "Attack Hub", icon: Swords },
   { href: "/dao", label: "DAO Review", icon: Vote },
   { href: "/promotion", label: "Promotion", icon: TrendingUp },
+  { href: "/status", label: "Chain Status", icon: Activity },
 ];
 
 export function Nav() {
