@@ -2,13 +2,7 @@
 
 Web interface for the Battle Chain Safe Harbor protocol. Browse, create, and manage Safe Harbor agreements, view registered attacks, and compile Solidity contracts.
 
-## Self-Hosting
-
-### Prerequisites
-
-- Docker and Docker Compose
-
-### 1. Create a `docker-compose.yaml`
+### Self-Hosting
 
 ```yaml
 services:
@@ -28,15 +22,3 @@ services:
       - BATTLECHAIN_DEPLOYER=${BATTLECHAIN_DEPLOYER:-0x8f57054CBa2021bEE15631067dd7B7E0B43F17Dc}
     restart: unless-stopped
 ```
-
-### 2. Start
-
-```bash
-docker compose up -d
-```
-
-### Troubleshooting
-
-**App shows blank page or broken links** — Check that all environment variables are set. Missing or incorrect values will cause the client to fail silently.
-
-**SQLite errors** — Ensure `db/` is writable by UID 1001: `sudo chown -R 1001:1001 ./db`
