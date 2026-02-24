@@ -29,19 +29,19 @@ export const agreementAbi = [
           {
             name: "chains",
             type: "tuple[]",
-            internalType: "struct ScopeChain[]",
+            internalType: "struct Chain[]",
             components: [
-              { name: "caip2ChainId", type: "string", internalType: "string" },
               { name: "assetRecoveryAddress", type: "string", internalType: "string" },
               {
                 name: "accounts",
                 type: "tuple[]",
-                internalType: "struct ScopeAccount[]",
+                internalType: "struct Account[]",
                 components: [
                   { name: "accountAddress", type: "string", internalType: "string" },
                   { name: "childContractScope", type: "uint8", internalType: "enum ChildContractScope" },
                 ],
               },
+              { name: "caip2ChainId", type: "string", internalType: "string" },
             ],
           },
           {

@@ -1,0 +1,1185 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "registry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "battleChainCaip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "details",
+        "type": "tuple",
+        "internalType": "struct AgreementDetails",
+        "components": [
+          {
+            "name": "protocolName",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "contactDetails",
+            "type": "tuple[]",
+            "internalType": "struct Contact[]",
+            "components": [
+              {
+                "name": "name",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "contact",
+                "type": "string",
+                "internalType": "string"
+              }
+            ]
+          },
+          {
+            "name": "chains",
+            "type": "tuple[]",
+            "internalType": "struct Chain[]",
+            "components": [
+              {
+                "name": "assetRecoveryAddress",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "accounts",
+                "type": "tuple[]",
+                "internalType": "struct Account[]",
+                "components": [
+                  {
+                    "name": "accountAddress",
+                    "type": "string",
+                    "internalType": "string"
+                  },
+                  {
+                    "name": "childContractScope",
+                    "type": "uint8",
+                    "internalType": "enum ChildContractScope"
+                  }
+                ]
+              },
+              {
+                "name": "caip2ChainId",
+                "type": "string",
+                "internalType": "string"
+              }
+            ]
+          },
+          {
+            "name": "bountyTerms",
+            "type": "tuple",
+            "internalType": "struct BountyTerms",
+            "components": [
+              {
+                "name": "bountyPercentage",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyCapUsd",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "retainable",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "identity",
+                "type": "uint8",
+                "internalType": "enum IdentityRequirements"
+              },
+              {
+                "name": "diligenceRequirements",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "aggregateBountyCapUsd",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "agreementURI",
+            "type": "string",
+            "internalType": "string"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "VERSION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addAccounts",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "newAccounts",
+        "type": "tuple[]",
+        "internalType": "struct Account[]",
+        "components": [
+          {
+            "name": "accountAddress",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "childContractScope",
+            "type": "uint8",
+            "internalType": "enum ChildContractScope"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addOrSetChains",
+    "inputs": [
+      {
+        "name": "chains",
+        "type": "tuple[]",
+        "internalType": "struct Chain[]",
+        "components": [
+          {
+            "name": "assetRecoveryAddress",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "accounts",
+            "type": "tuple[]",
+            "internalType": "struct Account[]",
+            "components": [
+              {
+                "name": "accountAddress",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "childContractScope",
+                "type": "uint8",
+                "internalType": "enum ChildContractScope"
+              }
+            ]
+          },
+          {
+            "name": "caip2ChainId",
+            "type": "string",
+            "internalType": "string"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "extendCommitmentWindow",
+    "inputs": [
+      {
+        "name": "newCantChangeUntil",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "getAgreementURI",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAssetRecoveryAddress",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getBattleChainCaip2ChainId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getBattleChainScopeAddresses",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getBattleChainScopeCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getBountyTerms",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct BountyTerms",
+        "components": [
+          {
+            "name": "bountyPercentage",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyCapUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "retainable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "identity",
+            "type": "uint8",
+            "internalType": "enum IdentityRequirements"
+          },
+          {
+            "name": "diligenceRequirements",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "aggregateBountyCapUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCantChangeUntil",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getChainAccounts",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "accounts",
+        "type": "tuple[]",
+        "internalType": "struct Account[]",
+        "components": [
+          {
+            "name": "accountAddress",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "childContractScope",
+            "type": "uint8",
+            "internalType": "enum ChildContractScope"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getChainIds",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string[]",
+        "internalType": "string[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getDetails",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "details",
+        "type": "tuple",
+        "internalType": "struct AgreementDetails",
+        "components": [
+          {
+            "name": "protocolName",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "contactDetails",
+            "type": "tuple[]",
+            "internalType": "struct Contact[]",
+            "components": [
+              {
+                "name": "name",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "contact",
+                "type": "string",
+                "internalType": "string"
+              }
+            ]
+          },
+          {
+            "name": "chains",
+            "type": "tuple[]",
+            "internalType": "struct Chain[]",
+            "components": [
+              {
+                "name": "assetRecoveryAddress",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "accounts",
+                "type": "tuple[]",
+                "internalType": "struct Account[]",
+                "components": [
+                  {
+                    "name": "accountAddress",
+                    "type": "string",
+                    "internalType": "string"
+                  },
+                  {
+                    "name": "childContractScope",
+                    "type": "uint8",
+                    "internalType": "enum ChildContractScope"
+                  }
+                ]
+              },
+              {
+                "name": "caip2ChainId",
+                "type": "string",
+                "internalType": "string"
+              }
+            ]
+          },
+          {
+            "name": "bountyTerms",
+            "type": "tuple",
+            "internalType": "struct BountyTerms",
+            "components": [
+              {
+                "name": "bountyPercentage",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "bountyCapUsd",
+                "type": "uint256",
+                "internalType": "uint256"
+              },
+              {
+                "name": "retainable",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "identity",
+                "type": "uint8",
+                "internalType": "enum IdentityRequirements"
+              },
+              {
+                "name": "diligenceRequirements",
+                "type": "string",
+                "internalType": "string"
+              },
+              {
+                "name": "aggregateBountyCapUsd",
+                "type": "uint256",
+                "internalType": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "agreementURI",
+            "type": "string",
+            "internalType": "string"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getProtocolName",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isContractInScope",
+    "inputs": [
+      {
+        "name": "contractAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "removeAccounts",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "accountAddresses",
+        "type": "string[]",
+        "internalType": "string[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeChains",
+    "inputs": [
+      {
+        "name": "caip2ChainIds",
+        "type": "string[]",
+        "internalType": "string[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setAgreementURI",
+    "inputs": [
+      {
+        "name": "agreementURI",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setBountyTerms",
+    "inputs": [
+      {
+        "name": "bountyTerms",
+        "type": "tuple",
+        "internalType": "struct BountyTerms",
+        "components": [
+          {
+            "name": "bountyPercentage",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyCapUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "retainable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "identity",
+            "type": "uint8",
+            "internalType": "enum IdentityRequirements"
+          },
+          {
+            "name": "diligenceRequirements",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "aggregateBountyCapUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setContactDetails",
+    "inputs": [
+      {
+        "name": "contactDetails",
+        "type": "tuple[]",
+        "internalType": "struct Contact[]",
+        "components": [
+          {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "contact",
+            "type": "string",
+            "internalType": "string"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setProtocolName",
+    "inputs": [
+      {
+        "name": "protocolName",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "version",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "event",
+    "name": "AccountAdded",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "account",
+        "type": "tuple",
+        "indexed": false,
+        "internalType": "struct Account",
+        "components": [
+          {
+            "name": "accountAddress",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "childContractScope",
+            "type": "uint8",
+            "internalType": "enum ChildContractScope"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AccountRemoved",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "accountAddress",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AgreementURIUpdated",
+    "inputs": [
+      {
+        "name": "newAgreementURI",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BattleChainSafeHarborRegistryUpdated",
+    "inputs": [
+      {
+        "name": "newRegistry",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BattleChainScopeAddressAdded",
+    "inputs": [
+      {
+        "name": "addr",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BattleChainScopeAddressRemoved",
+    "inputs": [
+      {
+        "name": "addr",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BattleChainScopeCleared",
+    "inputs": [],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BountyTermsUpdated",
+    "inputs": [
+      {
+        "name": "newBountyTerms",
+        "type": "tuple",
+        "indexed": false,
+        "internalType": "struct BountyTerms",
+        "components": [
+          {
+            "name": "bountyPercentage",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "bountyCapUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "retainable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "identity",
+            "type": "uint8",
+            "internalType": "enum IdentityRequirements"
+          },
+          {
+            "name": "diligenceRequirements",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "aggregateBountyCapUsd",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ChainAddedOrSet",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "assetRecoveryAddress",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "accounts",
+        "type": "tuple[]",
+        "indexed": false,
+        "internalType": "struct Account[]",
+        "components": [
+          {
+            "name": "accountAddress",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "childContractScope",
+            "type": "uint8",
+            "internalType": "enum ChildContractScope"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ChainRemoved",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CommitmentWindowExtended",
+    "inputs": [
+      {
+        "name": "newCantChangeUntil",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ContactDetailsSet",
+    "inputs": [
+      {
+        "name": "newContactDetails",
+        "type": "tuple[]",
+        "indexed": false,
+        "internalType": "struct Contact[]",
+        "components": [
+          {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "contact",
+            "type": "string",
+            "internalType": "string"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolNameUpdated",
+    "inputs": [
+      {
+        "name": "newName",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "Agreement__AccountNotFoundByAddress",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "accountAddress",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__AggregateBountyCapBelowIndividualCap",
+    "inputs": [
+      {
+        "name": "aggregateCap",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "individualCap",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__BountyPercentageExceedsMax",
+    "inputs": [
+      {
+        "name": "bountyPercentage",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__CannotChangeAgreementURIDuringCommitment",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Agreement__CannotReduceScopeDuringCommitment",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Agreement__CannotRemoveAllAccounts",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__CannotSetBothAggregateBountyCapUsdAndRetainable",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Agreement__CannotShortenCommitmentWindow",
+    "inputs": [
+      {
+        "name": "current",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "proposed",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__ChainIdHasZeroLength",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Agreement__ChainNotFoundByCaip2Id",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__DuplicateChainId",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__InvalidAddressLength",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Agreement__InvalidAssetRecoveryAddress",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__InvalidChainId",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__UnfavorableBountyChange",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Agreement__ZeroAccountsForChainId",
+    "inputs": [
+      {
+        "name": "caip2ChainId",
+        "type": "string",
+        "internalType": "string"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Agreement__ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OwnableInvalidOwner",
+    "inputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnableUnauthorizedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  }
+]

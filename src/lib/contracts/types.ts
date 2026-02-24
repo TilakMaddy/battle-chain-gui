@@ -30,8 +30,9 @@ export const CONTRACT_STATE_COLORS: Record<ContractState, string> = {
 
 export enum ChildContractScope {
   None = 0,
-  ExistingAtTimeOfAgreement = 1,
+  ExistingOnly = 1,
   All = 2,
+  FutureOnly = 3,
 }
 
 export enum IdentityRequirements {
@@ -48,8 +49,9 @@ export const IDENTITY_LABELS: Record<IdentityRequirements, string> = {
 
 export const CHILD_SCOPE_LABELS: Record<ChildContractScope, string> = {
   [ChildContractScope.None]: "None",
-  [ChildContractScope.ExistingAtTimeOfAgreement]: "Existing at Time of Agreement",
+  [ChildContractScope.ExistingOnly]: "Existing Only",
   [ChildContractScope.All]: "All",
+  [ChildContractScope.FutureOnly]: "Future Only",
 };
 
 export interface Contact {
@@ -63,9 +65,9 @@ export interface ScopeAccount {
 }
 
 export interface ScopeChain {
-  caip2ChainId: string;
   assetRecoveryAddress: string;
   accounts: ScopeAccount[];
+  caip2ChainId: string;
 }
 
 export interface BountyTerms {

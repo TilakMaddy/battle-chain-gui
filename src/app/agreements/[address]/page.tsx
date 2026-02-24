@@ -12,8 +12,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StateBadge } from "@/components/web3/state-badge";
 import {
   useAgreementDetails,
+  useAgreementDetailsFromLogs,
   useAgreementOwner,
   useIsAgreementValid,
+  useIsAgreementContract,
   useAssetRecoveryAddress,
 } from "@/lib/hooks/use-agreement";
 import {
@@ -38,6 +40,8 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -56,19 +60,50 @@ export default function AgreementDetailPage({
 
 function AgreementDetailContent({ address }: { address: `0x${string}` }) {
   const { address: wallet } = useAccount();
-  const { data: details, isLoading: loadingDetails } = useAgreementDetails(address);
-  const { data: owner } = useAgreementOwner(address);
-  const { data: stateRaw, isLoading: loadingState } = useAgreementState(address);
-  const { data: isValid } = useIsAgreementValid(address);
-  const { data: recoveryAddr } = useAssetRecoveryAddress(address);
+
+  const {
+    data: isAgreement,
+    isLoading: loadingCheck,
+  } = useIsAgreementContract(address);
+
+  const agreementConfirmed = isAgreement === true;
+
+  const {
+    data: details,
+    isLoading: loadingDetails,
+    isError: detailsError,
+    error: detailsErrorInfo,
+    refetch: refetchDetails,
+  } = useAgreementDetails(agreementConfirmed ? address : undefined);
+
+  const {
+    data: logFallback,
+    isLoading: loadingLogs,
+  } = useAgreementDetailsFromLogs(
+    agreementConfirmed ? address : undefined,
+    detailsError,
+  );
+
+  const { data: owner } = useAgreementOwner(agreementConfirmed ? address : undefined);
+  const {
+    data: stateRaw,
+    isLoading: loadingState,
+    refetch: refetchState,
+  } = useAgreementState(agreementConfirmed ? address : undefined);
+  const { data: isValid } = useIsAgreementValid(agreementConfirmed ? address : undefined);
+  const { data: recoveryAddr } = useAssetRecoveryAddress(agreementConfirmed ? address : undefined);
 
   const { requestAttack, isPending: attackPending } = useRequestAttackMode();
   const { requestPromotion, isPending: promotionPending } = useRequestPromotion();
 
-  const state = stateRaw as ContractState | undefined;
-  const isOwner = wallet && owner && wallet.toLowerCase() === (owner as string).toLowerCase();
+  const resolvedDetails = details ?? logFallback?.details;
+  const resolvedOwner = owner ?? logFallback?.owner;
 
-  if (loadingDetails || loadingState) {
+  const state = stateRaw as ContractState | undefined;
+  const ownerAddr = resolvedOwner as string | undefined;
+  const isOwner = wallet && ownerAddr && wallet.toLowerCase() === ownerAddr.toLowerCase();
+
+  if (loadingCheck || (agreementConfirmed && ((loadingDetails && !detailsError) || (detailsError && loadingLogs) || loadingState))) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-64" />
@@ -78,7 +113,27 @@ function AgreementDetailContent({ address }: { address: `0x${string}` }) {
     );
   }
 
-  const d = details as {
+  if (!loadingCheck && !agreementConfirmed) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title="Agreement" />
+        <div className="rounded-lg border p-3 bg-muted/50">
+          <span className="text-sm text-muted-foreground">Address: </span>
+          <span className="font-mono text-sm">{address}</span>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center space-y-4">
+            <XCircle className="mx-auto h-8 w-8 text-red-500" />
+            <p className="text-muted-foreground">
+              This address is not a recognized agreement contract.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const d = resolvedDetails as {
     protocolName: string;
     contactDetails: { name: string; contact: string }[];
     chains: {
@@ -121,8 +176,22 @@ function AgreementDetailContent({ address }: { address: `0x${string}` }) {
 
       {!d ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Could not load agreement details. The contract may not exist.
+          <CardContent className="py-12 text-center space-y-4">
+            <AlertTriangle className="mx-auto h-8 w-8 text-yellow-500" />
+            <p className="text-muted-foreground">
+              {detailsError
+                ? `Failed to load agreement details: ${(detailsErrorInfo as { shortMessage?: string })?.shortMessage || detailsErrorInfo?.message || "Unknown error"}`
+                : "Could not load agreement details. The contract may not exist."}
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                refetchDetails();
+                refetchState();
+              }}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" /> Retry
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -188,19 +257,19 @@ function AgreementDetailContent({ address }: { address: `0x${string}` }) {
                 <div>
                   <p className="text-sm text-muted-foreground">Bounty %</p>
                   <p className="text-lg font-bold">
-                    {Number(d.bountyTerms.bountyPercentage) / 100}%
+                    {(BigInt(d.bountyTerms.bountyPercentage) / 100n).toString()}%
                   </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Cap (USD)</p>
                   <p className="text-lg font-bold">
-                    ${Number(d.bountyTerms.bountyCapUsd).toLocaleString()}
+                    ${BigInt(d.bountyTerms.bountyCapUsd).toLocaleString()}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Aggregate Cap</p>
                   <p className="text-lg font-bold">
-                    ${Number(d.bountyTerms.aggregateBountyCapUsd).toLocaleString()}
+                    ${BigInt(d.bountyTerms.aggregateBountyCapUsd).toLocaleString()}
                   </p>
                 </div>
                 <div>

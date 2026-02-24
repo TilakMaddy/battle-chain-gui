@@ -21,19 +21,19 @@ export const agreementFactoryAbi = [
           {
             name: "chains",
             type: "tuple[]",
-            internalType: "struct ScopeChain[]",
+            internalType: "struct Chain[]",
             components: [
-              { name: "caip2ChainId", type: "string", internalType: "string" },
               { name: "assetRecoveryAddress", type: "string", internalType: "string" },
               {
                 name: "accounts",
                 type: "tuple[]",
-                internalType: "struct ScopeAccount[]",
+                internalType: "struct Account[]",
                 components: [
                   { name: "accountAddress", type: "string", internalType: "string" },
                   { name: "childContractScope", type: "uint8", internalType: "enum ChildContractScope" },
                 ],
               },
+              { name: "caip2ChainId", type: "string", internalType: "string" },
             ],
           },
           {
@@ -78,6 +78,7 @@ export const agreementFactoryAbi = [
     inputs: [
       { name: "agreementAddress", type: "address", indexed: true, internalType: "address" },
       { name: "owner", type: "address", indexed: true, internalType: "address" },
+      { name: "salt", type: "bytes32", indexed: true, internalType: "bytes32" },
     ],
     anonymous: false,
   },

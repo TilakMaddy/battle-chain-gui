@@ -9,7 +9,11 @@ export const config = getDefaultConfig({
   projectId: "battlechain-gui-local",
   chains: [battlechain],
   transports: {
-    [battlechain.id]: http(process.env.NEXT_PUBLIC_RPC_URL),
+    [battlechain.id]: http(process.env.NEXT_PUBLIC_RPC_URL, {
+      batch: true,
+      retryCount: 3,
+      timeout: 10_000,
+    }),
   },
   ssr: true,
 });

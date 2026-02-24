@@ -1,6 +1,8 @@
 "use client";
 
-import { useReadContract, useWriteContract } from "wagmi";
+import { useReadContract, useWriteContract, usePublicClient } from "wagmi";
+import { useQuery } from "@tanstack/react-query";
+import { decodeFunctionData } from "viem";
 import {
   agreementFactoryAbi,
   agreementAbi,
@@ -155,5 +157,53 @@ export function useIsAgreementContract(address: `0x${string}` | undefined) {
     functionName: "isAgreementContract",
     args: address ? [address] : undefined,
     query: { enabled: !!address },
+  });
+}
+
+/**
+ * Fallback: fetch agreement details from the factory's AgreementCreated event logs
+ * and decode the create() transaction input. Used when getDetails() fails.
+ */
+export function useAgreementDetailsFromLogs(
+  agreementAddress: `0x${string}` | undefined,
+  enabled = false
+) {
+  const client = usePublicClient();
+
+  return useQuery({
+    queryKey: ["agreement-details-logs", agreementAddress],
+    queryFn: async () => {
+      if (!client || !agreementAddress) return null;
+
+      const logs = await client.getLogs({
+        address: factoryAddress,
+        event: {
+          type: "event" as const,
+          name: "AgreementCreated" as const,
+          inputs: [
+            { name: "agreementAddress", type: "address", indexed: true },
+            { name: "owner", type: "address", indexed: true },
+          ],
+        },
+        args: { agreementAddress },
+        fromBlock: 0n,
+        toBlock: "latest",
+      });
+
+      if (logs.length === 0) return null;
+
+      const tx = await client.getTransaction({
+        hash: logs[0].transactionHash,
+      });
+
+      const { args } = decodeFunctionData({
+        abi: agreementFactoryAbi,
+        data: tx.input,
+      });
+
+      // create(details, owner, salt)
+      return { details: args[0], owner: args[1] as `0x${string}` };
+    },
+    enabled: enabled && !!agreementAddress && !!client,
   });
 }
