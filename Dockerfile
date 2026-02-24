@@ -1,16 +1,25 @@
-# Stage 1: Install dependencies
+# Stage 1: Install Foundry (rarely changes — cached aggressively)
+FROM node:22-alpine AS foundry
+RUN apk add --no-cache curl bash git
+ENV FOUNDRY_DIR="/opt/foundry"
+ENV SHELL="/bin/bash"
+RUN curl -L https://foundry.paradigm.xyz | bash \
+    && ${FOUNDRY_DIR}/bin/foundryup
+
+# Stage 2: Install Node dependencies
 FROM node:22-alpine AS deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Stage 2: Build the application
+# Stage 3: Build the application
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy only what next build needs
+COPY package.json ./
 COPY src ./src
 COPY public ./public
 COPY next.config.ts tsconfig.json postcss.config.mjs eslint.config.mjs components.json ./
@@ -29,15 +38,12 @@ RUN printf '%s\n' \
 
 RUN npm run build
 
-# Stage 3: Production runner
+# Stage 4: Production runner
 FROM node:22-alpine AS runner
-RUN apk add --no-cache curl bash
 
-# Install Foundry (needed for /api/compile route)
-ENV FOUNDRY_DIR="/opt/foundry"
-RUN curl -L https://foundry.paradigm.xyz | bash \
-    && ${FOUNDRY_DIR}/bin/foundryup
-ENV PATH="${FOUNDRY_DIR}/bin:${PATH}"
+# Copy only the Foundry binaries from the foundry stage
+COPY --from=foundry /opt/foundry/bin /opt/foundry/bin
+ENV PATH="/opt/foundry/bin:${PATH}"
 
 WORKDIR /app
 ENV NODE_ENV=production
