@@ -4,6 +4,7 @@ import "./globals.css";
 import { Web3Provider } from "@/lib/wagmi/provider";
 import { Sidebar } from "@/components/layout/sidebar";
 import { SignOutButton } from "@/components/layout/sign-out-button";
+import { SelfHostBanner } from "@/components/layout/self-host-banner";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -32,6 +33,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Web3Provider>
+          <SelfHostBanner />
           <div className="flex">
             <Sidebar />
             <main className="relative flex-1 overflow-y-auto px-6 py-8">
