@@ -148,7 +148,7 @@ function DeployContent() {
           return (
             <div key={label} className="flex items-center gap-2">
               <div
-                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
                   i <= stepIdx
                     ? step === "failed" && i === 1 ? "bg-red-900 text-white" : "bg-red-600 text-white"
                     : "bg-muted text-muted-foreground"

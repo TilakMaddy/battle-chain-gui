@@ -32,8 +32,8 @@ import { CONTRACTS } from "@/lib/contracts/addresses";
 import { ContractState } from "@/lib/contracts/types";
 import { StateBadge } from "@/components/web3/state-badge";
 
-const RPC_URL = "https://testnet.battlechain.com:3051";
-const EXPLORER_URL = "https://explorer.testnet.battlechain.com";
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://testnet.battlechain.com:3051";
+const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer.testnet.battlechain.com";
 
 // ---------------------------------------------------------------------------
 // RPC helpers
@@ -162,6 +162,20 @@ interface RpcLatency {
   latency: number;
   success: boolean;
   timestamp: number;
+}
+
+interface RecentTx {
+  hash: string;
+  from: string;
+  to: string | null;
+  value: string;
+  blockNumber: number;
+  blockHash: string;
+  nonce: number;
+  gas: number;
+  gasPrice: string | null;
+  timestamp: number;
+  index: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +397,58 @@ async function fetchRecentBlocks(latestNum: number, count = 10): Promise<RecentB
 }
 
 // ---------------------------------------------------------------------------
+// Recent Transactions fetcher — pulls full tx objects from recent blocks
+// ---------------------------------------------------------------------------
+
+async function fetchRecentTransactions(
+  latestNum: number,
+  maxTxs = 30
+): Promise<RecentTx[]> {
+  const txs: RecentTx[] = [];
+  let blockNum = latestNum;
+
+  while (txs.length < maxTxs && blockNum >= 0) {
+    const batchSize = Math.min(5, blockNum + 1);
+    const nums = Array.from({ length: batchSize }, (_, i) => blockNum - i);
+
+    const blocks = await Promise.all(
+      nums.map((n) =>
+        rpc("eth_getBlockByNumber", ["0x" + n.toString(16), true]).catch(
+          () => null
+        )
+      )
+    );
+
+    for (const b of blocks) {
+      if (!b || !b.transactions) continue;
+      const blockTs = hexToNumber(b.timestamp);
+      const blockNr = hexToNumber(b.number);
+      for (let i = 0; i < b.transactions.length; i++) {
+        const tx = b.transactions[i];
+        txs.push({
+          hash: tx.hash,
+          from: tx.from,
+          to: tx.to ?? null,
+          value: tx.value ?? "0x0",
+          blockNumber: blockNr,
+          blockHash: b.hash,
+          nonce: hexToNumber(tx.nonce),
+          gas: hexToNumber(tx.gas),
+          gasPrice: tx.gasPrice ?? tx.maxFeePerGas ?? null,
+          timestamp: blockTs,
+          index: i,
+        });
+      }
+    }
+
+    blockNum -= batchSize;
+    if (blocks.every((b) => !b)) break;
+  }
+
+  return txs.slice(0, maxTxs);
+}
+
+// ---------------------------------------------------------------------------
 // RPC latency probe
 // ---------------------------------------------------------------------------
 
@@ -466,6 +532,10 @@ export default function StatusPage() {
   // Recent blocks
   const [recentBlocks, setRecentBlocks] = useState<RecentBlock[]>([]);
   const [recentBlocksLoading, setRecentBlocksLoading] = useState(true);
+
+  // Recent transactions
+  const [recentTxs, setRecentTxs] = useState<RecentTx[]>([]);
+  const [recentTxsLoading, setRecentTxsLoading] = useState(true);
 
   // RPC latency
   const [rpcLatencies, setRpcLatencies] = useState<RpcLatency[]>([]);
@@ -599,6 +669,12 @@ export default function StatusPage() {
       }
       const blocks = await fetchRecentBlocks(num, 15);
       setRecentBlocks(blocks);
+
+      // Also fetch recent transactions
+      fetchRecentTransactions(num, 30)
+        .then(setRecentTxs)
+        .catch(() => {})
+        .finally(() => setRecentTxsLoading(false));
     } catch {
       // ignore
     } finally {
@@ -1299,22 +1375,28 @@ export default function StatusPage() {
                     >
                       <div className="col-span-3 flex items-center gap-1.5">
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse shrink-0" />
-                        <span
-                          className="truncate cursor-pointer hover:text-foreground"
+                        <a
+                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="truncate hover:text-blue-400 hover:underline transition-colors"
                           title={tx.hash}
-                          onClick={() => {
-                            setTxInput(tx.hash);
-                            setTxResult(null);
-                          }}
                         >
                           {truncateHash(tx.hash, 8)}
-                        </span>
+                        </a>
                       </div>
                       <div
                         className="col-span-3 truncate text-muted-foreground"
                         title={tx.from}
                       >
-                        {truncateHash(tx.from)}
+                        <a
+                          href={`${EXPLORER_URL}/address/${tx.from}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          {truncateHash(tx.from)}
+                        </a>
                       </div>
                       <div
                         className="col-span-2 truncate text-muted-foreground"
@@ -1328,7 +1410,14 @@ export default function StatusPage() {
                             CREATE
                           </Badge>
                         ) : (
-                          truncateHash(tx.to!)
+                          <a
+                            href={`${EXPLORER_URL}/address/${tx.to}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-blue-400 hover:underline transition-colors"
+                          >
+                            {truncateHash(tx.to!)}
+                          </a>
                         )}
                       </div>
                       <div className="col-span-1 text-right text-muted-foreground">
@@ -1441,19 +1530,27 @@ export default function StatusPage() {
                         className="flex items-center gap-3 rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
                       >
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse shrink-0" />
-                        <span
-                          className="truncate cursor-pointer hover:text-foreground"
+                        <a
+                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="truncate hover:text-blue-400 hover:underline transition-colors"
                           title={tx.hash}
-                          onClick={() => {
-                            setTxInput(tx.hash);
-                            setTxResult(null);
-                          }}
                         >
                           {truncateHash(tx.hash, 10)}
-                        </span>
+                        </a>
                         <span className="text-muted-foreground">nonce:{tx.nonce}</span>
                         <span className="text-muted-foreground">
-                          {tx.to ? truncateHash(tx.to) : "CREATE"}
+                          {tx.to ? (
+                            <a
+                              href={`${EXPLORER_URL}/address/${tx.to}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:text-blue-400 hover:underline transition-colors"
+                            >
+                              {truncateHash(tx.to)}
+                            </a>
+                          ) : "CREATE"}
                         </span>
                         <span className="ml-auto">{formatEth(tx.value)} ETH</span>
                       </div>
@@ -1593,20 +1690,41 @@ export default function StatusPage() {
                       className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
                     >
                       <div className="col-span-2 font-bold">
-                        #{block.number}
+                        <a
+                          href={`${EXPLORER_URL}/block/${block.number}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          #{block.number}
+                        </a>
                       </div>
                       <div
                         className="col-span-3 text-muted-foreground truncate"
                         title={block.hash}
                       >
-                        {truncateHash(block.hash, 8)}
+                        <a
+                          href={`${EXPLORER_URL}/block/${block.number}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          {truncateHash(block.hash, 8)}
+                        </a>
                       </div>
                       <div className="col-span-2 text-muted-foreground">
                         {formatAge(age)}
                       </div>
                       <div className="col-span-1 text-right">
                         {block.txCount > 0 ? (
-                          <span className="text-foreground">{block.txCount}</span>
+                          <a
+                            href={`${EXPLORER_URL}/block/${block.number}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-foreground hover:text-blue-400 hover:underline transition-colors"
+                          >
+                            {block.txCount}
+                          </a>
                         ) : (
                           <span className="text-muted-foreground/50">0</span>
                         )}
@@ -1640,6 +1758,133 @@ export default function StatusPage() {
                         ) : (
                           "—"
                         )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Recent Transactions                                                  */}
+      {/* ------------------------------------------------------------------ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <ListChecks className="h-5 w-5" />
+              Recent Transactions
+            </CardTitle>
+            {recentTxs.length > 0 && (
+              <Badge variant="outline" className="text-xs font-mono">
+                {recentTxs.length} txs
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recentTxsLoading && recentTxs.length === 0 ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : recentTxs.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No transactions found in recent blocks.
+            </p>
+          ) : (
+            <div className="space-y-0.5">
+              {/* Header */}
+              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
+                <div className="col-span-3">Tx Hash</div>
+                <div className="col-span-2">From</div>
+                <div className="col-span-2">To</div>
+                <div className="col-span-1 text-right">Value</div>
+                <div className="col-span-1 text-right">Block</div>
+                <div className="col-span-1 text-right">Nonce</div>
+                <div className="col-span-2 text-right">Age</div>
+              </div>
+              <Separator />
+              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
+                {recentTxs.map((tx) => {
+                  const now = Math.floor(Date.now() / 1000);
+                  const age = now - tx.timestamp;
+                  const isCreate = !tx.to;
+                  const value = tx.value ? parseInt(tx.value, 16) : 0;
+                  const ethValue = value / 1e18;
+                  return (
+                    <div
+                      key={`${tx.hash}-${tx.index}`}
+                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="col-span-3 truncate">
+                        <a
+                          href={`${EXPLORER_URL}/tx/${tx.hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                          title={tx.hash}
+                        >
+                          {truncateHash(tx.hash, 8)}
+                        </a>
+                      </div>
+                      <div className="col-span-2 truncate text-muted-foreground">
+                        <a
+                          href={`${EXPLORER_URL}/address/${tx.from}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                          title={tx.from}
+                        >
+                          {truncateHash(tx.from)}
+                        </a>
+                      </div>
+                      <div className="col-span-2 truncate text-muted-foreground">
+                        {isCreate ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] py-0 px-1 bg-blue-500/10 text-blue-400 border-blue-500/30"
+                          >
+                            CREATE
+                          </Badge>
+                        ) : (
+                          <a
+                            href={`${EXPLORER_URL}/address/${tx.to}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-blue-400 hover:underline transition-colors"
+                            title={tx.to!}
+                          >
+                            {truncateHash(tx.to!)}
+                          </a>
+                        )}
+                      </div>
+                      <div className="col-span-1 text-right">
+                        {ethValue > 0 ? (
+                          <span className="text-foreground">{ethValue < 0.001 ? "<0.001" : ethValue.toFixed(3)}</span>
+                        ) : (
+                          <span className="text-muted-foreground/50">0</span>
+                        )}
+                      </div>
+                      <div className="col-span-1 text-right">
+                        <a
+                          href={`${EXPLORER_URL}/block/${tx.blockNumber}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="hover:text-blue-400 hover:underline transition-colors"
+                        >
+                          #{tx.blockNumber}
+                        </a>
+                      </div>
+                      <div className="col-span-1 text-right text-muted-foreground">
+                        {tx.nonce}
+                      </div>
+                      <div className="col-span-2 text-right text-muted-foreground">
+                        {formatAge(age)}
                       </div>
                     </div>
                   );
@@ -2135,16 +2380,15 @@ export default function StatusPage() {
                       <span
                         className={`inline-block h-2 w-2 rounded-full shrink-0 ${dotColor} ${r.status === "pending" ? "animate-pulse" : ""}`}
                       />
-                      <span
-                        className="truncate flex-1 cursor-pointer hover:text-foreground"
+                      <a
+                        href={`${EXPLORER_URL}/tx/${r.hash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate flex-1 hover:text-blue-400 hover:underline transition-colors"
                         title={r.hash}
-                        onClick={() => {
-                          setTxInput(r.hash);
-                          setTxResult(null);
-                        }}
                       >
                         {truncateHash(r.hash, 10)}
-                      </span>
+                      </a>
                       <span className={`uppercase text-[10px] font-bold w-16 text-right ${statusColor}`}>
                         {r.status === "not_found" ? "N/A" : r.status}
                       </span>
@@ -2211,9 +2455,8 @@ export default function StatusPage() {
                   const count = registryContracts.filter(
                     (c) => c.state === state
                   ).length;
-                  if (count === 0) return null;
                   return (
-                    <div key={state} className="flex items-center gap-1.5">
+                    <div key={state} className={`flex items-center gap-1.5 ${count === 0 ? "opacity-40" : ""}`}>
                       <StateBadge state={state} />
                       <span className="text-xs font-mono font-bold">{count}</span>
                     </div>
@@ -2297,7 +2540,7 @@ export default function StatusPage() {
                     `#${health.blockInfo.number.toLocaleString()}`,
                     `${EXPLORER_URL}/block/${health.blockInfo.number}`,
                   ],
-                  ["Block Hash", health.blockInfo.hash, `${EXPLORER_URL}/block/${health.blockInfo.hash}`],
+                  ["Block Hash", health.blockInfo.hash, `${EXPLORER_URL}/block/${health.blockInfo.number}`],
                   [
                     "Timestamp",
                     new Date(

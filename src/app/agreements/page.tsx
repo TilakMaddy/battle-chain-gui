@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePublicClient } from "wagmi";
-import { parseAbiItem } from "viem";
 import Link from "next/link";
 import { ChainGuard } from "@/components/web3/chain-guard";
 import { PageHeader } from "@/components/layout/page-header";
@@ -31,6 +29,19 @@ import { ContractState, CONTRACT_STATE_LABELS } from "@/lib/contracts/types";
 import { useDeployments } from "@/lib/hooks/use-deployments";
 import { FileText, Search, Plus, ExternalLink, Rocket } from "lucide-react";
 
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://testnet.battlechain.com:3051";
+
+async function rpc(method: string, params: unknown[] = []) {
+  const res = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message);
+  return json.result;
+}
+
 interface AgreementRow {
   address: `0x${string}`;
   latestState: ContractState;
@@ -47,7 +58,6 @@ export default function AgreementsPage() {
 }
 
 function AgreementsContent() {
-  const publicClient = usePublicClient();
   const [agreements, setAgreements] = useState<AgreementRow[]>([]);
   const { deployments } = useDeployments();
   const [loading, setLoading] = useState(true);
@@ -56,27 +66,42 @@ function AgreementsContent() {
 
   useEffect(() => {
     async function fetchAgreements() {
-      if (!publicClient) return;
       try {
-        const logs = await publicClient.getLogs({
-          address: CONTRACTS.AttackRegistry as `0x${string}`,
-          event: parseAbiItem(
-            "event AgreementStateChanged(address indexed agreementAddress, uint8 previousState, uint8 newState)"
-          ),
-          fromBlock: 0n,
-          toBlock: "latest",
-        });
+        const logs = await rpc("eth_getLogs", [
+          {
+            address: CONTRACTS.AttackRegistry,
+            fromBlock: "0x0",
+            toBlock: "latest",
+          },
+        ]);
 
         const map = new Map<`0x${string}`, AgreementRow>();
         for (const log of logs) {
-          const addr = log.args.agreementAddress as `0x${string}`;
+          // AgreementStateChanged: topic[0] = event sig, topic[1] = indexed agreementAddress
+          if (!log.topics || log.topics.length < 2) continue;
+          const addr = ("0x" + log.topics[1].slice(26)) as `0x${string}`;
+
+          // data contains abi.encode(uint8 prevState, uint8 newState)
+          let newState = 0;
+          const data: string = log.data ?? "0x";
+          if (data.length >= 130) {
+            newState = parseInt(data.slice(66, 130), 16);
+          } else if (data.length >= 66) {
+            newState = parseInt(data.slice(2, 66), 16);
+          } else if (data.length > 2) {
+            newState = parseInt(data.slice(-2), 16);
+          }
+
+          const blockNumber = BigInt(log.blockNumber);
           map.set(addr, {
             address: addr,
-            latestState: Number(log.args.newState) as ContractState,
-            blockNumber: log.blockNumber,
+            latestState: newState as ContractState,
+            blockNumber,
           });
         }
-        setAgreements(Array.from(map.values()).sort((a, b) => Number(b.blockNumber - a.blockNumber)));
+        setAgreements(
+          Array.from(map.values()).sort((a, b) => Number(b.blockNumber - a.blockNumber))
+        );
       } catch (err) {
         console.error("Failed to fetch agreements:", err);
       } finally {
@@ -84,7 +109,7 @@ function AgreementsContent() {
       }
     }
     fetchAgreements();
-  }, [publicClient]);
+  }, []);
 
   const filtered = agreements.filter((a) => {
     const matchesSearch = !search || a.address.toLowerCase().includes(search.toLowerCase());
