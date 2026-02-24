@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Web3Provider } from "@/lib/wagmi/provider";
 import { Sidebar } from "@/components/layout/sidebar";
+import { SignOutButton } from "@/components/layout/sign-out-button";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -33,7 +34,10 @@ export default function RootLayout({
         <Web3Provider>
           <div className="flex">
             <Sidebar />
-            <main className="flex-1 overflow-y-auto px-6 py-8">{children}</main>
+            <main className="relative flex-1 overflow-y-auto px-6 py-8">
+              <SignOutButton />
+              {children}
+            </main>
           </div>
           <Toaster richColors position="bottom-right" />
         </Web3Provider>
