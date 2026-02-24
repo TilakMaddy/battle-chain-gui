@@ -106,8 +106,38 @@ function CreateAgreementContent() {
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  const isValidAddress = (addr: string) =>
+    /^0x[0-9a-fA-F]{40}$/.test(addr);
+
+  const validateForm = (): string | null => {
+    if (!form.protocolName.trim()) return "Protocol name is required.";
+    if (!isValidAddress(form.assetRecoveryAddress))
+      return "Asset recovery address must be a valid 0x address (42 characters).";
+    for (let i = 0; i < form.accounts.length; i++) {
+      if (!isValidAddress(form.accounts[i].accountAddress))
+        return `In-scope contract #${i + 1} must be a valid 0x address (42 characters).`;
+    }
+    const pct = Number(form.bountyPercentage);
+    if (isNaN(pct) || pct < 0 || pct > 100)
+      return "Bounty percentage must be between 0 and 100.";
+    const cap = Number(form.bountyCapUsd);
+    const aggCap = Number(form.aggregateBountyCapUsd);
+    if (aggCap > 0 && aggCap < cap)
+      return "Aggregate bounty cap must be >= individual bounty cap.";
+    if (form.retainable && aggCap > 0)
+      return "Cannot set both retainable and aggregate bounty cap.";
+    return null;
+  };
+
   const handleSubmit = async () => {
     if (!address) return;
+
+    const validationError = validateForm();
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
     setSubmitting(true);
     try {
       const salt = keccak256(
@@ -145,9 +175,30 @@ function CreateAgreementContent() {
       // In a production app we'd parse the tx receipt logs. For now, prompt user.
       toast.info("Agreement created! Check your wallet for the next transactions.");
       setAgreementAddr("pending");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      toast.error("Transaction failed");
+      const msg =
+        err instanceof Error ? err.message : "Transaction failed";
+      // Surface contract revert reasons from the error message
+      if (msg.includes("BountyPercentageExceedsMax")) {
+        toast.error("Bounty percentage exceeds maximum (100).");
+      } else if (msg.includes("InvalidAssetRecoveryAddress")) {
+        toast.error("Invalid asset recovery address.");
+      } else if (msg.includes("ZeroAccountsForChainId")) {
+        toast.error("At least one in-scope contract is required.");
+      } else if (msg.includes("InvalidAddressLength")) {
+        toast.error("One or more addresses have invalid length (must be 42-char 0x hex).");
+      } else if (msg.includes("InvalidChainId")) {
+        toast.error("Invalid chain ID.");
+      } else if (msg.includes("CannotSetBothAggregateBountyCapUsdAndRetainable")) {
+        toast.error("Cannot set both retainable and aggregate bounty cap.");
+      } else if (msg.includes("AggregateBountyCapBelowIndividualCap")) {
+        toast.error("Aggregate bounty cap must be >= individual bounty cap.");
+      } else if (msg.includes("User rejected") || msg.includes("user rejected")) {
+        toast.error("Transaction rejected by user.");
+      } else {
+        toast.error(msg.length > 200 ? msg.slice(0, 200) + "..." : msg);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -390,10 +441,23 @@ function CreateAgreementContent() {
               <Button variant="outline" onClick={() => setStep(1)}>
                 <ArrowLeft className="mr-2 h-4 w-4" /> Back
               </Button>
-              <Button onClick={() => setStep(3)} className="bg-red-600 hover:bg-red-700">
+              <Button
+                onClick={() => setStep(3)}
+                disabled={
+                  !isValidAddress(form.assetRecoveryAddress) ||
+                  form.accounts.some((a) => !isValidAddress(a.accountAddress))
+                }
+                className="bg-red-600 hover:bg-red-700"
+              >
                 Next <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </div>
+            {(!isValidAddress(form.assetRecoveryAddress) ||
+              form.accounts.some((a) => !isValidAddress(a.accountAddress))) && (
+              <p className="text-sm text-red-400">
+                All addresses must be valid 0x format (42 characters).
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -483,9 +547,22 @@ function CreateAgreementContent() {
               <Button variant="outline" onClick={() => setStep(2)}>
                 <ArrowLeft className="mr-2 h-4 w-4" /> Back
               </Button>
-              <Button onClick={() => setStep(4)} className="bg-red-600 hover:bg-red-700">
+              <Button
+                onClick={() => setStep(4)}
+                disabled={
+                  Number(form.bountyPercentage) < 0 ||
+                  Number(form.bountyPercentage) > 100 ||
+                  (form.retainable && Number(form.aggregateBountyCapUsd) > 0)
+                }
+                className="bg-red-600 hover:bg-red-700"
+              >
                 Review <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
+              {Number(form.bountyPercentage) > 100 && (
+                <p className="text-sm text-red-400">
+                  Bounty percentage cannot exceed 100.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
