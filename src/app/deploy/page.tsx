@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAccount } from "wagmi";
+import { keccak256 } from "viem";
 import { ChainGuard } from "@/components/web3/chain-guard";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,18 +18,67 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useDeployCreate, useDeployCreate2 } from "@/lib/hooks/use-deployer";
+import {
+  useDeployCreate,
+  useDeployCreate2,
+  useDeployCreate3,
+  useComputeCreateAddress,
+  useComputeCreate2Address,
+  useComputeCreate3Address,
+} from "@/lib/hooks/use-deployer";
 import { SAMPLE_CONTRACTS } from "@/lib/contracts/samples";
-import { Rocket, CheckCircle, Loader2, Code, FileCode, Terminal, ExternalLink } from "lucide-react";
+import { CopyableAddress } from "@/components/ui/copyable-address";
+import {
+  Rocket,
+  CheckCircle,
+  Loader2,
+  Code,
+  FileCode,
+  Terminal,
+  ExternalLink,
+  Calculator,
+} from "lucide-react";
 import Link from "next/link";
 
 type Step = "configure" | "signing" | "confirming" | "complete" | "failed";
+type DeployMethod = "create" | "create2" | "create3";
 
 export default function DeployPage() {
   return (
     <ChainGuard>
-      <DeployContent />
+      <DeployPageContent />
     </ChainGuard>
+  );
+}
+
+function DeployPageContent() {
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Deploy Contract"
+        description="Deploy contracts through BattleChainDeployer for automatic AttackRegistry registration"
+      />
+      <Tabs defaultValue="deploy">
+        <TabsList>
+          <TabsTrigger value="deploy">
+            <Rocket className="mr-1.5 h-3.5 w-3.5" />
+            Deploy
+          </TabsTrigger>
+          <TabsTrigger value="calculator">
+            <Calculator className="mr-1.5 h-3.5 w-3.5" />
+            Address Calculator
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="deploy" className="mt-6">
+          <DeployContent />
+        </TabsContent>
+
+        <TabsContent value="calculator" className="mt-6">
+          <AddressCalculator />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 
@@ -37,7 +87,7 @@ function DeployContent() {
   const [step, setStep] = useState<Step>("configure");
   const [bytecode, setBytecode] = useState("");
   const [salt, setSalt] = useState("");
-  const [useCreate2, setUseCreate2] = useState(false);
+  const [deployMethod, setDeployMethod] = useState<DeployMethod>("create");
   const [txHash, setTxHash] = useState("");
   const [deployedAddress, setDeployedAddress] = useState("");
   const [deployError, setDeployError] = useState("");
@@ -54,7 +104,8 @@ function DeployContent() {
 
   const deployCreate = useDeployCreate();
   const deployCreate2 = useDeployCreate2();
-  const isPending = deployCreate.isPending || deployCreate2.isPending;
+  const deployCreate3 = useDeployCreate3();
+  const isPending = deployCreate.isPending || deployCreate2.isPending || deployCreate3.isPending;
 
   const handleSelectSample = (sampleId: string) => {
     const sample = SAMPLE_CONTRACTS.find((s) => s.id === sampleId);
@@ -92,9 +143,14 @@ function DeployContent() {
       setDeployError("");
       setStep("signing");
 
-      const result = useCreate2 && salt
-        ? await deployCreate2.deploy(salt as `0x${string}`, bytecode as `0x${string}`)
-        : await deployCreate.deploy(bytecode as `0x${string}`);
+      let result;
+      if (deployMethod === "create2" && salt) {
+        result = await deployCreate2.deploy(salt as `0x${string}`, bytecode as `0x${string}`);
+      } else if (deployMethod === "create3" && salt) {
+        result = await deployCreate3.deploy(salt as `0x${string}`, bytecode as `0x${string}`);
+      } else {
+        result = await deployCreate.deploy(bytecode as `0x${string}`);
+      }
 
       // If we get here, wallet signed and receipt came back
       setTxHash(result.hash);
@@ -131,12 +187,7 @@ function DeployContent() {
   };
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        title="Deploy Contract"
-        description="Deploy contracts through BattleChainDeployer for automatic AttackRegistry registration"
-      />
-
+    <div className="space-y-6">
       {/* Step Indicator */}
       <div className="flex items-center gap-4">
         {["Configure", "Deploying", "Complete"].map((label, i) => {
@@ -306,18 +357,38 @@ function DeployContent() {
               <CardTitle>Deploy Options</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  id="create2"
-                  checked={useCreate2}
-                  onChange={(e) => setUseCreate2(e.target.checked)}
-                  className="h-4 w-4"
-                />
-                <Label htmlFor="create2">Use CREATE2 (deterministic address)</Label>
+              <div className="space-y-3">
+                <Label>Deploy Method</Label>
+                <div className="flex gap-4">
+                  {(["create", "create2", "create3"] as DeployMethod[]).map((method) => (
+                    <label
+                      key={method}
+                      className="flex items-center gap-2 cursor-pointer"
+                    >
+                      <input
+                        type="radio"
+                        name="deploy-method"
+                        value={method}
+                        checked={deployMethod === method}
+                        onChange={() => setDeployMethod(method)}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-sm font-medium">
+                        {method === "create" ? "CREATE" : method === "create2" ? "CREATE2" : "CREATE3"}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {deployMethod === "create"
+                    ? "Standard deployment using the deployer's nonce."
+                    : deployMethod === "create2"
+                    ? "Deterministic address based on salt and init code."
+                    : "Deterministic address based on salt only (init code independent)."}
+                </p>
               </div>
 
-              {useCreate2 && (
+              {(deployMethod === "create2" || deployMethod === "create3") && (
                 <div className="space-y-2">
                   <Label>Salt (bytes32)</Label>
                   <Input
@@ -419,6 +490,196 @@ function DeployContent() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+function AddressCalculator() {
+  const { address } = useAccount();
+
+  // CREATE state
+  const [createNonce, setCreateNonce] = useState("");
+  const nonceValue = createNonce !== "" && !isNaN(Number(createNonce))
+    ? BigInt(createNonce)
+    : undefined;
+  const {
+    data: createAddr,
+    isLoading: createLoading,
+  } = useComputeCreateAddress(nonceValue);
+
+  // CREATE2 state
+  const [create2Salt, setCreate2Salt] = useState("");
+  const [create2InitCode, setCreate2InitCode] = useState("");
+  const [create2InitCodeHash, setCreate2InitCodeHash] = useState("");
+  const validCreate2Salt = /^0x[0-9a-fA-F]{64}$/.test(create2Salt)
+    ? (create2Salt as `0x${string}`)
+    : undefined;
+  const validCreate2Hash = /^0x[0-9a-fA-F]{64}$/.test(create2InitCodeHash)
+    ? (create2InitCodeHash as `0x${string}`)
+    : undefined;
+  const {
+    data: create2Addr,
+    isLoading: create2Loading,
+  } = useComputeCreate2Address(validCreate2Salt, validCreate2Hash);
+
+  const handleHashInitCode = () => {
+    if (!create2InitCode.startsWith("0x")) return;
+    try {
+      const hash = keccak256(create2InitCode as `0x${string}`);
+      setCreate2InitCodeHash(hash);
+    } catch {
+      // invalid bytecode
+    }
+  };
+
+  // CREATE3 state
+  const [create3Salt, setCreate3Salt] = useState("");
+  const validCreate3Salt = /^0x[0-9a-fA-F]{64}$/.test(create3Salt)
+    ? (create3Salt as `0x${string}`)
+    : undefined;
+  const {
+    data: create3Addr,
+    isLoading: create3Loading,
+  } = useComputeCreate3Address(validCreate3Salt);
+
+  return (
+    <div className="space-y-6">
+      {/* CREATE */}
+      <Card>
+        <CardHeader>
+          <CardTitle>CREATE Address</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Deployer Address</Label>
+            <Input
+              value={address ?? ""}
+              disabled
+              className="font-mono bg-muted/50"
+            />
+            <p className="text-xs text-muted-foreground">
+              Auto-filled from your connected wallet.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="create-nonce">Nonce</Label>
+            <Input
+              id="create-nonce"
+              type="number"
+              placeholder="0"
+              value={createNonce}
+              onChange={(e) => setCreateNonce(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          {createLoading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Computing...
+            </div>
+          )}
+          {createAddr && (
+            <div className="rounded-lg border p-3 bg-muted/50">
+              <Label className="text-xs text-muted-foreground">Computed Address</Label>
+              <div className="mt-1">
+                <CopyableAddress address={createAddr as string} truncate={false} />
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* CREATE2 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>CREATE2 Address</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="create2-salt">Salt (bytes32)</Label>
+            <Input
+              id="create2-salt"
+              placeholder="0x0000000000000000000000000000000000000000000000000000000000000001"
+              value={create2Salt}
+              onChange={(e) => setCreate2Salt(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="create2-initcode">Init Code (bytecode)</Label>
+            <textarea
+              id="create2-initcode"
+              className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              placeholder="0x608060405234801561001057..."
+              value={create2InitCode}
+              onChange={(e) => setCreate2InitCode(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleHashInitCode}
+              disabled={!create2InitCode.startsWith("0x")}
+            >
+              Hash It
+            </Button>
+          </div>
+          {create2InitCodeHash && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Init Code Hash (keccak256)</Label>
+              <div className="rounded-md border bg-muted/50 p-2 font-mono text-xs break-all">
+                {create2InitCodeHash}
+              </div>
+            </div>
+          )}
+          {create2Loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Computing...
+            </div>
+          )}
+          {create2Addr && (
+            <div className="rounded-lg border p-3 bg-muted/50">
+              <Label className="text-xs text-muted-foreground">Computed Address</Label>
+              <div className="mt-1">
+                <CopyableAddress address={create2Addr as string} truncate={false} />
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* CREATE3 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>CREATE3 Address</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="create3-salt">Salt (bytes32)</Label>
+            <Input
+              id="create3-salt"
+              placeholder="0x0000000000000000000000000000000000000000000000000000000000000001"
+              value={create3Salt}
+              onChange={(e) => setCreate3Salt(e.target.value)}
+              className="font-mono"
+            />
+          </div>
+          {create3Loading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Computing...
+            </div>
+          )}
+          {create3Addr && (
+            <div className="rounded-lg border p-3 bg-muted/50">
+              <Label className="text-xs text-muted-foreground">Computed Address</Label>
+              <div className="mt-1">
+                <CopyableAddress address={create3Addr as string} truncate={false} />
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

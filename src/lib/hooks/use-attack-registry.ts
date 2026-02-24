@@ -4,6 +4,7 @@ import { useReadContract, useWriteContract, useWatchContractEvent } from "wagmi"
 import { attackRegistryAbi } from "@/lib/contracts/abis";
 import { CONTRACTS } from "@/lib/contracts/addresses";
 import { ContractState } from "@/lib/contracts/types";
+import type { AgreementInfo } from "@/lib/contracts/types";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
@@ -171,7 +172,6 @@ export function useCancelPromotion() {
 
 export interface AgreementEvent {
   agreementAddress: `0x${string}`;
-  previousState: ContractState;
   newState: ContractState;
   blockNumber: bigint;
 }
@@ -186,7 +186,6 @@ export function useAgreementEvents() {
     onLogs(logs) {
       const newEvents = logs.map((log) => ({
         agreementAddress: log.args.agreementAddress as `0x${string}`,
-        previousState: Number(log.args.previousState) as ContractState,
         newState: Number(log.args.newState) as ContractState,
         blockNumber: log.blockNumber,
       }));
@@ -215,4 +214,161 @@ export function useAgreementForContract(contractAddress: `0x${string}` | undefin
     args: contractAddress ? [contractAddress] : undefined,
     query: { enabled: !!contractAddress },
   });
+}
+
+// --- New hooks ---
+
+export function useAgreementInfo(agreementAddress: `0x${string}` | undefined) {
+  const result = useReadContract({
+    address: registryAddress,
+    abi: attackRegistryAbi,
+    functionName: "getAgreementInfo",
+    args: agreementAddress ? [agreementAddress] : undefined,
+    query: { enabled: !!agreementAddress, refetchInterval: 10_000 },
+  });
+
+  return {
+    ...result,
+    info: result.data as AgreementInfo | undefined,
+  };
+}
+
+export function useAuthorizedOwner(contractAddress: `0x${string}` | undefined) {
+  return useReadContract({
+    address: registryAddress,
+    abi: attackRegistryAbi,
+    functionName: "getAuthorizedOwner",
+    args: contractAddress ? [contractAddress] : undefined,
+    query: { enabled: !!contractAddress },
+  });
+}
+
+export function useAttackModerator(agreementAddress: `0x${string}` | undefined) {
+  return useReadContract({
+    address: registryAddress,
+    abi: attackRegistryAbi,
+    functionName: "getAttackModerator",
+    args: agreementAddress ? [agreementAddress] : undefined,
+    query: { enabled: !!agreementAddress },
+  });
+}
+
+export function useContractDeployer(contractAddress: `0x${string}` | undefined) {
+  return useReadContract({
+    address: registryAddress,
+    abi: attackRegistryAbi,
+    functionName: "getContractDeployer",
+    args: contractAddress ? [contractAddress] : undefined,
+    query: { enabled: !!contractAddress },
+  });
+}
+
+export function useGoToProduction() {
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const goToProduction = useCallback(
+    async (agreementAddress: `0x${string}`) => {
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: attackRegistryAbi,
+        functionName: "goToProduction",
+        args: [agreementAddress],
+      });
+      toast.success("Moved to production", {
+        description: `TX: ${hash.slice(0, 10)}...`,
+      });
+      return hash;
+    },
+    [writeContractAsync]
+  );
+
+  return { goToProduction, isPending };
+}
+
+export function useMarkCorrupted() {
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const markCorrupted = useCallback(
+    async (agreementAddress: `0x${string}`) => {
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: attackRegistryAbi,
+        functionName: "markCorrupted",
+        args: [agreementAddress],
+      });
+      toast.success("Agreement marked as corrupted", {
+        description: `TX: ${hash.slice(0, 10)}...`,
+      });
+      return hash;
+    },
+    [writeContractAsync]
+  );
+
+  return { markCorrupted, isPending };
+}
+
+export function useTransferAttackModerator() {
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const transferModerator = useCallback(
+    async (agreementAddress: `0x${string}`, newModerator: `0x${string}`) => {
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: attackRegistryAbi,
+        functionName: "transferAttackModerator",
+        args: [agreementAddress, newModerator],
+      });
+      toast.success("Attack moderator transferred", {
+        description: `TX: ${hash.slice(0, 10)}...`,
+      });
+      return hash;
+    },
+    [writeContractAsync]
+  );
+
+  return { transferModerator, isPending };
+}
+
+export function useAuthorizeAgreementOwner() {
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const authorizeOwner = useCallback(
+    async (contractAddress: `0x${string}`, newOwner: `0x${string}`) => {
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: attackRegistryAbi,
+        functionName: "authorizeAgreementOwner",
+        args: [contractAddress, newOwner],
+      });
+      toast.success("Agreement owner authorized", {
+        description: `TX: ${hash.slice(0, 10)}...`,
+      });
+      return hash;
+    },
+    [writeContractAsync]
+  );
+
+  return { authorizeOwner, isPending };
+}
+
+export function useInstantPromote() {
+  const { writeContractAsync, isPending } = useWriteContract();
+
+  const instantPromote = useCallback(
+    async (agreementAddress: `0x${string}`) => {
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: attackRegistryAbi,
+        functionName: "instantPromote",
+        args: [agreementAddress],
+      });
+      toast.success("Agreement instantly promoted", {
+        description: `TX: ${hash.slice(0, 10)}...`,
+      });
+      return hash;
+    },
+    [writeContractAsync]
+  );
+
+  return { instantPromote, isPending };
 }

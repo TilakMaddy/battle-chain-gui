@@ -86,3 +86,14 @@ export interface AgreementDetails {
   bountyTerms: BountyTerms;
   agreementURI: string;
 }
+
+export interface AgreementInfo {
+  attackModerator: `0x${string}`;
+  deadlineTimestamp: bigint;
+  promotionRequestedTimestamp: bigint;
+  attackRequested: boolean;
+  attackApproved: boolean;
+  promoted: boolean;
+  corrupted: boolean;
+  isRegistered: boolean;
+}

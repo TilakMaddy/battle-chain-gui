@@ -10,6 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateBadge } from "@/components/web3/state-badge";
+import { StateMachine } from "@/components/agreement/state-machine";
+import { CommitmentWindowBar } from "@/components/agreement/commitment-window-bar";
+import { ContextualActions } from "@/components/agreement/contextual-actions";
+import { AgreementInfoPanel } from "@/components/agreement/agreement-info-panel";
 import {
   useAgreementDetails,
   useAgreementDetailsFromLogs,
@@ -22,6 +26,10 @@ import {
   useAgreementState,
   useRequestAttackMode,
   useRequestPromotion,
+  useGoToProduction,
+  useMarkCorrupted,
+  useCancelPromotion,
+  usePromote,
 } from "@/lib/hooks/use-attack-registry";
 import {
   ContractState,
@@ -31,19 +39,14 @@ import {
   ChildContractScope,
 } from "@/lib/contracts/types";
 import {
-  Shield,
   User,
   MapPin,
   DollarSign,
-  Swords,
-  TrendingUp,
   CheckCircle,
   XCircle,
-  Loader2,
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
-import Link from "next/link";
 
 export default function AgreementDetailPage({
   params,
@@ -93,15 +96,46 @@ function AgreementDetailContent({ address }: { address: `0x${string}` }) {
   const { data: isValid } = useIsAgreementValid(agreementConfirmed ? address : undefined);
   const { data: recoveryAddr } = useAssetRecoveryAddress(agreementConfirmed ? address : undefined);
 
+  // Hooks for state machine actions
   const { requestAttack, isPending: attackPending } = useRequestAttackMode();
   const { requestPromotion, isPending: promotionPending } = useRequestPromotion();
+  const { goToProduction, isPending: prodPending } = useGoToProduction();
+  const { markCorrupted, isPending: corruptPending } = useMarkCorrupted();
+  const { cancel: cancelPromotion, isPending: cancelPending } = useCancelPromotion();
+  const { promote, isPending: promotePending } = usePromote();
 
   const resolvedDetails = details ?? logFallback?.details;
   const resolvedOwner = owner ?? logFallback?.owner;
 
   const state = stateRaw as ContractState | undefined;
   const ownerAddr = resolvedOwner as string | undefined;
-  const isOwner = wallet && ownerAddr && wallet.toLowerCase() === ownerAddr.toLowerCase();
+  const isOwner = !!(wallet && ownerAddr && wallet.toLowerCase() === ownerAddr.toLowerCase());
+
+  const actionPending =
+    attackPending || promotionPending || prodPending || corruptPending || cancelPending || promotePending;
+
+  const handleStateMachineAction = (action: string) => {
+    switch (action) {
+      case "requestAttack":
+        requestAttack(address);
+        break;
+      case "goToProduction":
+        goToProduction(address);
+        break;
+      case "requestPromotion":
+        requestPromotion(address);
+        break;
+      case "markCorrupted":
+        markCorrupted(address);
+        break;
+      case "cancelPromotion":
+        cancelPromotion(address);
+        break;
+      case "promote":
+        promote(address);
+        break;
+    }
+  };
 
   if (loadingCheck || (agreementConfirmed && ((loadingDetails && !detailsError) || (detailsError && loadingLogs) || loadingState))) {
     return (
@@ -173,6 +207,23 @@ function AgreementDetailContent({ address }: { address: `0x${string}` }) {
         <span className="text-sm text-muted-foreground">Address: </span>
         <span className="font-mono text-sm">{address}</span>
       </div>
+
+      {/* State Machine Visualization */}
+      {state !== undefined && (
+        <Card>
+          <CardContent className="py-6">
+            <StateMachine
+              currentState={state}
+              isOwner={isOwner}
+              onAction={handleStateMachineAction}
+              isPending={actionPending}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Commitment Window */}
+      <CommitmentWindowBar agreementAddress={address} />
 
       {!d ? (
         <Card>
@@ -292,53 +343,17 @@ function AgreementDetailContent({ address }: { address: `0x${string}` }) {
             </CardContent>
           </Card>
 
-          {/* Actions */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5" /> Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-3">
-              {state === ContractState.NEW_DEPLOYMENT && isOwner && (
-                <Button
-                  onClick={() => requestAttack(address)}
-                  disabled={attackPending}
-                  className="bg-red-600 hover:bg-red-700"
-                >
-                  {attackPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  <Swords className="mr-2 h-4 w-4" /> Request Attack Mode
-                </Button>
-              )}
-              {state === ContractState.UNDER_ATTACK && (
-                <Link href={`/attack/${address}`}>
-                  <Button variant="destructive">
-                    <Swords className="mr-2 h-4 w-4" /> View Attack Panel
-                  </Button>
-                </Link>
-              )}
-              {state === ContractState.UNDER_ATTACK && isOwner && (
-                <Button
-                  onClick={() => requestPromotion(address)}
-                  disabled={promotionPending}
-                  variant="outline"
-                >
-                  {promotionPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  <TrendingUp className="mr-2 h-4 w-4" /> Request Promotion
-                </Button>
-              )}
-              {state === ContractState.ATTACK_REQUESTED && (
-                <Link href="/dao">
-                  <Button variant="outline">Awaiting DAO Review</Button>
-                </Link>
-              )}
-              {state === ContractState.PRODUCTION && (
-                <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-500/30 text-base px-4 py-2">
-                  Production
-                </Badge>
-              )}
-            </CardContent>
-          </Card>
+          {/* Contextual Actions (replaces old Actions card) */}
+          {state !== undefined && (
+            <ContextualActions
+              agreementAddress={address}
+              state={state}
+              isOwner={isOwner}
+            />
+          )}
+
+          {/* Debug Info Panel */}
+          <AgreementInfoPanel agreementAddress={address} />
         </>
       )}
     </div>

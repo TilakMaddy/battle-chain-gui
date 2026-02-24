@@ -1,6 +1,6 @@
 "use client";
 
-import { useWriteContract, usePublicClient } from "wagmi";
+import { useWriteContract, usePublicClient, useReadContract } from "wagmi";
 import { decodeEventLog } from "viem";
 import { battleChainDeployerAbi } from "@/lib/contracts/abis";
 import { attackRegistryAbi } from "@/lib/contracts/abis";
@@ -96,4 +96,69 @@ export function useDeployCreate2() {
   );
 
   return { deploy, isPending };
+}
+
+// --- New hooks ---
+
+export function useDeployCreate3() {
+  const { writeContractAsync, isPending } = useWriteContract();
+  const publicClient = usePublicClient();
+
+  const deploy = useCallback(
+    async (salt: `0x${string}`, bytecode: `0x${string}`): Promise<DeployResult> => {
+      const hash = await writeContractAsync({
+        address: deployerAddress,
+        abi: battleChainDeployerAbi,
+        functionName: "deployCreate3",
+        args: [salt, bytecode],
+      });
+
+      if (!publicClient) throw new Error("No public client");
+
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      const deployedAddress = parseDeployedAddress(receipt.logs as never[]);
+
+      return {
+        hash,
+        deployedAddress,
+        status: receipt.status === "success" ? "success" : "reverted",
+      };
+    },
+    [writeContractAsync, publicClient]
+  );
+
+  return { deploy, isPending };
+}
+
+export function useComputeCreateAddress(nonce: bigint | undefined) {
+  return useReadContract({
+    address: deployerAddress,
+    abi: battleChainDeployerAbi,
+    functionName: "computeCreateAddress",
+    args: nonce !== undefined ? [nonce] : undefined,
+    query: { enabled: nonce !== undefined },
+  });
+}
+
+export function useComputeCreate2Address(
+  salt: `0x${string}` | undefined,
+  initCodeHash: `0x${string}` | undefined
+) {
+  return useReadContract({
+    address: deployerAddress,
+    abi: battleChainDeployerAbi,
+    functionName: "computeCreate2Address",
+    args: salt && initCodeHash ? [salt, initCodeHash] : undefined,
+    query: { enabled: !!salt && !!initCodeHash },
+  });
+}
+
+export function useComputeCreate3Address(salt: `0x${string}` | undefined) {
+  return useReadContract({
+    address: deployerAddress,
+    abi: battleChainDeployerAbi,
+    functionName: "computeCreate3Address",
+    args: salt ? [salt] : undefined,
+    query: { enabled: !!salt },
+  });
 }

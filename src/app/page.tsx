@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StateBadge } from "@/components/web3/state-badge";
 import { useAgreementEvents } from "@/lib/hooks/use-attack-registry";
-import { CONTRACT_STATE_LABELS } from "@/lib/contracts/types";
+
 import Link from "next/link";
 import {
   Rocket,
@@ -85,9 +85,7 @@ function DashboardContent() {
                     >
                       {event.agreementAddress.slice(0, 10)}...{event.agreementAddress.slice(-6)}
                     </Link>
-                    <span className="text-muted-foreground text-sm">
-                      {CONTRACT_STATE_LABELS[event.previousState]} &rarr;
-                    </span>
+                    <span className="text-muted-foreground text-sm">&rarr;</span>
                     <StateBadge state={event.newState} />
                   </div>
                   <span className="text-xs text-muted-foreground font-mono">

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Web3Provider } from "@/lib/wagmi/provider";
-import { Nav } from "@/components/layout/nav";
+import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -31,8 +31,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <Web3Provider>
-          <Nav />
-          <main className="mx-auto max-w-7xl px-4 py-8">{children}</main>
+          <div className="flex">
+            <Sidebar />
+            <main className="flex-1 overflow-y-auto px-6 py-8">{children}</main>
+          </div>
           <Toaster richColors position="bottom-right" />
         </Web3Provider>
       </body>
