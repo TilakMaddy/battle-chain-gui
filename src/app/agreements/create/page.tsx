@@ -128,7 +128,7 @@ function CreateAgreementContent() {
             },
           ],
           bountyTerms: {
-            bountyPercentage: BigInt(Math.round(Number(form.bountyPercentage) * 100)),
+            bountyPercentage: BigInt(Math.round(Number(form.bountyPercentage))),
             bountyCapUsd: BigInt(form.bountyCapUsd),
             retainable: form.retainable,
             identity: form.identity,
