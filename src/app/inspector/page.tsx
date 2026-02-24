@@ -13,7 +13,7 @@ import { ContractIdentityCard } from "@/components/inspector/contract-identity-c
 import { AgreementInfoDisplay } from "@/components/inspector/agreement-info-display";
 import { MiniTimeline } from "@/components/timeline/mini-timeline";
 import { useAgreementForContract, useIsUnderAttack } from "@/lib/hooks/use-attack-registry";
-import { useAgreementDetails, useIsContractInScope } from "@/lib/hooks/use-agreement";
+import { useAgreementDetails, useIsContractInScope, useIsAgreementContract } from "@/lib/hooks/use-agreement";
 import {
   IDENTITY_LABELS,
   IdentityRequirements,
@@ -106,9 +106,21 @@ function InspectorContent() {
 function InspectorResults({ contractAddress }: { contractAddress: `0x${string}` }) {
   const { data: linkedAgreementRaw, isLoading: loadingAgreement } =
     useAgreementForContract(contractAddress);
+  const { data: isAgreementItself, isLoading: loadingIsAgreement } =
+    useIsAgreementContract(contractAddress);
 
   const agreementAddr = linkedAgreementRaw as `0x${string}` | undefined;
-  const hasAgreement = agreementAddr && agreementAddr !== ZERO_ADDRESS;
+  const hasLinkedAgreement = agreementAddr && agreementAddr !== ZERO_ADDRESS;
+  const isLoading = loadingAgreement || loadingIsAgreement;
+
+  // Determine the effective agreement address:
+  // 1. If this address IS an agreement contract, use it directly
+  // 2. If it's linked to an agreement via the registry, use that
+  const effectiveAgreement = isAgreementItself
+    ? contractAddress
+    : hasLinkedAgreement
+      ? agreementAddr
+      : null;
 
   return (
     <div className="space-y-6">
@@ -116,28 +128,33 @@ function InspectorResults({ contractAddress }: { contractAddress: `0x${string}` 
       <div className="rounded-lg border p-3 bg-muted/50">
         <span className="text-sm text-muted-foreground">Inspecting: </span>
         <span className="font-mono text-sm">{contractAddress}</span>
+        {isAgreementItself && (
+          <Badge variant="outline" className="ml-2 bg-blue-500/20 text-blue-400 border-blue-500/30">
+            Agreement Contract
+          </Badge>
+        )}
       </div>
 
       {/* Contract Identity */}
       <ContractIdentityCard contractAddress={contractAddress} />
 
       {/* Agreement-linked sections */}
-      {loadingAgreement ? (
+      {isLoading ? (
         <div className="space-y-6">
           <Skeleton className="h-48 w-full" />
           <Skeleton className="h-48 w-full" />
         </div>
-      ) : hasAgreement ? (
+      ) : effectiveAgreement ? (
         <AgreementLinkedSection
           contractAddress={contractAddress}
-          agreementAddress={agreementAddr}
+          agreementAddress={effectiveAgreement}
         />
       ) : (
         <Card>
           <CardContent className="py-12 text-center space-y-2">
             <Shield className="mx-auto h-8 w-8 text-muted-foreground" />
             <p className="text-muted-foreground">
-              This contract is not linked to any agreement.
+              This address is not linked to any agreement.
             </p>
           </CardContent>
         </Card>
