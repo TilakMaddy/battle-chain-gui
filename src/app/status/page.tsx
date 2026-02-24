@@ -24,9 +24,16 @@ import {
   Timer,
   Inbox,
   Layers,
+  ListChecks,
+  Shield,
+  ExternalLink,
 } from "lucide-react";
+import { CONTRACTS } from "@/lib/contracts/addresses";
+import { ContractState } from "@/lib/contracts/types";
+import { StateBadge } from "@/components/web3/state-badge";
 
 const RPC_URL = "https://testnet.battlechain.com:3051";
+const EXPLORER_URL = "https://explorer.testnet.battlechain.com";
 
 // ---------------------------------------------------------------------------
 // RPC helpers
@@ -161,9 +168,25 @@ interface RpcLatency {
 // Mempool fetcher — tries multiple approaches
 // ---------------------------------------------------------------------------
 
+function parseTxObject(tx: Record<string, string>): MempoolTx {
+  return {
+    hash: tx.hash,
+    from: tx.from,
+    to: tx.to || null,
+    value: tx.value ? hexToBigInt(tx.value) : 0n,
+    nonce: hexToNumber(tx.nonce),
+    gas: hexToNumber(tx.gas),
+    maxFeePerGas: tx.maxFeePerGas ?? null,
+    maxPriorityFeePerGas: tx.maxPriorityFeePerGas ?? null,
+    gasPrice: tx.gasPrice ?? null,
+    input: tx.input ?? "0x",
+  };
+}
+
 async function fetchMempoolTxs(): Promise<{
   txs: MempoolTx[];
   txpoolStatus: TxpoolStatus | null;
+  stuckCount: number;
   source: string;
 }> {
   let txpoolStatus: TxpoolStatus | null = null;
@@ -187,66 +210,143 @@ async function fetchMempoolTxs(): Promise<{
     for (const bucket of [content.pending, content.queued]) {
       if (!bucket) continue;
       for (const senderTxs of Object.values(bucket)) {
-        for (const tx of Object.values(senderTxs as Record<string, Record<string, string>>)) {
-          txs.push({
-            hash: tx.hash,
-            from: tx.from,
-            to: tx.to || null,
-            value: tx.value ? hexToBigInt(tx.value) : 0n,
-            nonce: hexToNumber(tx.nonce),
-            gas: hexToNumber(tx.gas),
-            maxFeePerGas: tx.maxFeePerGas ?? null,
-            maxPriorityFeePerGas: tx.maxPriorityFeePerGas ?? null,
-            gasPrice: tx.gasPrice ?? null,
-            input: tx.input ?? "0x",
-          });
+        for (const tx of Object.values(
+          senderTxs as Record<string, Record<string, string>>
+        )) {
+          txs.push(parseTxObject(tx));
         }
       }
     }
 
     if (txs.length > 0 || txpoolStatus) {
-      return { txs, txpoolStatus, source: "txpool_content" };
+      return { txs, txpoolStatus, stuckCount: txs.length, source: "txpool_content" };
     }
   } catch {
     // txpool_content not supported, fall through
   }
 
-  // 3. Fallback: diff pending block vs latest block to find pending txs
+  // 3. Compute global stuck count from pending vs latest block tx count.
+  //    On ZKSync nodes where txpool is unavailable, the nonce gap from
+  //    eth_getBlockTransactionCountByNumber gives us a real stuck count.
+  let globalStuck = 0;
   try {
-    const [pendingBlock, latestBlock] = await Promise.all([
-      rpc("eth_getBlockByNumber", ["pending", true]),
-      rpc("eth_getBlockByNumber", ["latest", true]),
+    const [pendingCountHex, latestCountHex] = await Promise.all([
+      rpc("eth_getBlockTransactionCountByNumber", ["pending"]),
+      rpc("eth_getBlockTransactionCountByNumber", ["latest"]),
     ]);
-
-    const minedHashes = new Set<string>(
-      (latestBlock?.transactions ?? []).map((tx: { hash: string }) => tx.hash)
-    );
-
-    const pendingTxs = (pendingBlock?.transactions ?? []).filter(
-      (tx: { hash: string }) => !minedHashes.has(tx.hash)
-    );
-
-    const txs: MempoolTx[] = pendingTxs.map(
-      (tx: Record<string, string>) => ({
-        hash: tx.hash,
-        from: tx.from,
-        to: tx.to || null,
-        value: tx.value ? hexToBigInt(tx.value) : 0n,
-        nonce: hexToNumber(tx.nonce),
-        gas: hexToNumber(tx.gas),
-        maxFeePerGas: tx.maxFeePerGas ?? null,
-        maxPriorityFeePerGas: tx.maxPriorityFeePerGas ?? null,
-        gasPrice: tx.gasPrice ?? null,
-        input: tx.input ?? "0x",
-      })
-    );
-
-    return { txs, txpoolStatus, source: "pending_block" };
+    const pendingCount = hexToNumber(pendingCountHex);
+    const latestCount = hexToNumber(latestCountHex);
+    // pending block includes already-mined txs + mempool txs
+    globalStuck = Math.max(0, pendingCount - latestCount);
   } catch {
-    // pending block not supported either
+    // ignore
   }
 
-  return { txs: [], txpoolStatus, source: "none" };
+  // 4. Probe pending block by index, filtering out already-mined txs
+  try {
+    const latestBlock = await rpc("eth_getBlockByNumber", ["latest", false]);
+    const minedHashes = new Set<string>(latestBlock?.transactions ?? []);
+
+    const txs: MempoolTx[] = [];
+    const MAX_SCAN = 200;
+    for (let i = 0; i < MAX_SCAN; i++) {
+      const tx = await rpc("eth_getTransactionByBlockNumberAndIndex", [
+        "pending",
+        "0x" + i.toString(16),
+      ]);
+      if (!tx) break;
+      // Skip txs that are already mined in the latest block
+      if (minedHashes.has(tx.hash)) continue;
+      txs.push(parseTxObject(tx));
+    }
+    if (txs.length > 0) {
+      return {
+        txs,
+        txpoolStatus,
+        stuckCount: Math.max(globalStuck, txs.length),
+        source: "pending_block_index_scan",
+      };
+    }
+  } catch {
+    // not supported, fall through
+  }
+
+  // 5. If we detected a stuck count > 0 from step 3 but found no enumerable txs,
+  //    report the count honestly
+  if (globalStuck > 0) {
+    return {
+      txs: [],
+      txpoolStatus,
+      stuckCount: globalStuck,
+      source: "nonce_gap_detected",
+    };
+  }
+
+  return { txs: [], txpoolStatus, stuckCount: 0, source: "none" };
+}
+
+// ---------------------------------------------------------------------------
+// Per-address stuck tx scanner — discovers actual tx hashes from nonce gap
+// ---------------------------------------------------------------------------
+
+async function scanAddressStuckTxs(
+  address: string
+): Promise<{ txs: MempoolTx[]; confirmed: number; pending: number }> {
+  const [confirmedHex, pendingHex] = await Promise.all([
+    rpc("eth_getTransactionCount", [address, "latest"]),
+    rpc("eth_getTransactionCount", [address, "pending"]),
+  ]);
+  const confirmed = hexToNumber(confirmedHex);
+  const pending = hexToNumber(pendingHex);
+
+  if (pending <= confirmed) {
+    return { txs: [], confirmed, pending };
+  }
+
+  // The node knows about txs with nonces [confirmed .. pending-1].
+  // We can't query by sender+nonce directly, but we CAN get the pending block
+  // with full tx objects and filter by sender.
+  const txs: MempoolTx[] = [];
+
+  try {
+    const pendingBlock = await rpc("eth_getBlockByNumber", ["pending", true]);
+    const pendingTxObjects = pendingBlock?.transactions ?? [];
+    const addrLower = address.toLowerCase();
+
+    for (const tx of pendingTxObjects) {
+      if (typeof tx === "string") continue; // hash-only, skip
+      if (tx.from?.toLowerCase() === addrLower && tx.blockHash === null) {
+        txs.push(parseTxObject(tx));
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Also scan by index to catch txs the pending block might expose
+  try {
+    const addrLower = address.toLowerCase();
+    const seen = new Set(txs.map((t) => t.hash));
+    for (let i = 0; i < 300; i++) {
+      const tx = await rpc("eth_getTransactionByBlockNumberAndIndex", [
+        "pending",
+        "0x" + i.toString(16),
+      ]);
+      if (!tx) break;
+      if (
+        tx.from?.toLowerCase() === addrLower &&
+        !seen.has(tx.hash) &&
+        tx.blockHash === null
+      ) {
+        txs.push(parseTxObject(tx));
+        seen.add(tx.hash);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return { txs, confirmed, pending };
 }
 
 // ---------------------------------------------------------------------------
@@ -334,10 +434,26 @@ export default function StatusPage() {
   const [txpoolStatus, setTxpoolStatus] = useState<TxpoolStatus | null>(null);
   const [mempoolSource, setMempoolSource] = useState("loading");
   const [mempoolLoading, setMempoolLoading] = useState(true);
+  const [globalStuckCount, setGlobalStuckCount] = useState(0);
+
+  // Address mempool scanner
+  const [mempoolScanAddr, setMempoolScanAddr] = useState("");
+  const [mempoolScanResult, setMempoolScanResult] = useState<{
+    txs: MempoolTx[];
+    confirmed: number;
+    pending: number;
+    stuck: number;
+  } | null>(null);
+  const [mempoolScanLoading, setMempoolScanLoading] = useState(false);
 
   // Tx lookup
   const [txInput, setTxInput] = useState("");
   const [txResult, setTxResult] = useState<TxLookup | null>(null);
+
+  // Batch hash checker
+  const [batchHashInput, setBatchHashInput] = useState("");
+  const [batchResults, setBatchResults] = useState<TxLookup[]>([]);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   // Nonce diff
   const [nonceInput, setNonceInput] = useState("");
@@ -366,6 +482,12 @@ export default function StatusPage() {
     storageRoot: string | null;
   } | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
+
+  // Contract registry
+  const [registryContracts, setRegistryContracts] = useState<
+    { address: string; state: ContractState }[]
+  >([]);
+  const [registryLoading, setRegistryLoading] = useState(true);
 
   // Pulse counter for the live dot
   const pulseRef = useRef(0);
@@ -441,12 +563,31 @@ export default function StatusPage() {
       setMempoolTxs(result.txs);
       setTxpoolStatus(result.txpoolStatus);
       setMempoolSource(result.source);
+      setGlobalStuckCount(result.stuckCount);
     } catch {
       setMempoolSource("error");
     } finally {
       setMempoolLoading(false);
     }
   }, []);
+
+  const runMempoolScan = async () => {
+    const addr = mempoolScanAddr.trim();
+    if (!addr.startsWith("0x") || addr.length !== 42) return;
+    setMempoolScanLoading(true);
+    setMempoolScanResult(null);
+    try {
+      const result = await scanAddressStuckTxs(addr);
+      setMempoolScanResult({
+        ...result,
+        stuck: result.pending - result.confirmed,
+      });
+    } catch {
+      setMempoolScanResult(null);
+    } finally {
+      setMempoolScanLoading(false);
+    }
+  };
 
   const fetchBlocks = useCallback(async (latestNum?: number) => {
     setRecentBlocksLoading(true);
@@ -518,11 +659,67 @@ export default function StatusPage() {
     }
   };
 
+  // Fetch contracts from AttackRegistry via event logs
+  const fetchRegistry = useCallback(async () => {
+    setRegistryLoading(true);
+    try {
+      // Query all logs from AttackRegistry — the contract address narrows it enough.
+      // Event: AgreementStateChanged(address indexed agreementAddress, uint8 previousState, uint8 newState)
+      // topic[1] = agreementAddress (indexed), data = abi.encode(uint8 prevState, uint8 newState)
+      const logs = await rpc("eth_getLogs", [
+        {
+          address: CONTRACTS.AttackRegistry,
+          fromBlock: "0x0",
+          toBlock: "latest",
+        },
+      ]);
+
+      const map = new Map<string, ContractState>();
+      for (const log of logs) {
+        try {
+          const topics = log.topics;
+          if (!topics || topics.length < 2) continue;
+          // topic[1] = indexed agreementAddress (left-padded to 32 bytes)
+          const addr = "0x" + topics[1].slice(26);
+          // data contains two uint8s encoded as 32-byte words:
+          //   bytes 0-31: previousState, bytes 32-63: newState
+          const data: string = log.data;
+          let newState: number;
+          if (data.length >= 130) {
+            // Full 64 bytes (0x + 128 hex chars): parse second word
+            newState = parseInt(data.slice(66, 130), 16);
+          } else if (data.length >= 66) {
+            // Single word
+            newState = parseInt(data.slice(2, 66), 16);
+          } else {
+            newState = parseInt(data.slice(-2), 16);
+          }
+          if (newState >= 0 && newState <= 6) {
+            map.set(addr.toLowerCase(), newState as ContractState);
+          }
+        } catch {
+          // skip malformed log
+        }
+      }
+
+      const contracts = Array.from(map.entries()).map(([address, state]) => ({
+        address,
+        state,
+      }));
+      setRegistryContracts(contracts);
+    } catch {
+      // ignore
+    } finally {
+      setRegistryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchHealth();
     fetchMempool();
     fetchBlocks();
     runLatencyProbe();
+    fetchRegistry();
     const healthInterval = setInterval(fetchHealth, 10_000);
     const mempoolInterval = setInterval(fetchMempool, 12_000);
     const latencyInterval = setInterval(runLatencyProbe, 15_000);
@@ -536,7 +733,7 @@ export default function StatusPage() {
       clearInterval(latencyInterval);
       clearInterval(pulseInterval);
     };
-  }, [fetchHealth, fetchMempool, fetchBlocks, runLatencyProbe]);
+  }, [fetchHealth, fetchMempool, fetchBlocks, runLatencyProbe, fetchRegistry]);
 
   // Re-fetch blocks whenever latest block changes
   useEffect(() => {
@@ -611,6 +808,86 @@ export default function StatusPage() {
         nonce: null,
       });
     }
+  };
+
+  // Batch hash lookup — paste multiple hashes (comma, newline, or space separated)
+  const lookupBatch = async () => {
+    const raw = batchHashInput.trim();
+    if (!raw) return;
+    const hashes = raw
+      .split(/[\s,\n]+/)
+      .map((h) => h.trim())
+      .filter((h) => h.startsWith("0x") && h.length === 66);
+    if (hashes.length === 0) return;
+
+    setBatchLoading(true);
+    setBatchResults([]);
+
+    const results: TxLookup[] = [];
+    // Process in batches of 5 to avoid overwhelming the RPC
+    for (let i = 0; i < hashes.length; i += 5) {
+      const batch = hashes.slice(i, i + 5);
+      const batchRes = await Promise.all(
+        batch.map(async (hash) => {
+          try {
+            const [tx, receipt] = await Promise.all([
+              rpc("eth_getTransactionByHash", [hash]),
+              rpc("eth_getTransactionReceipt", [hash]),
+            ]);
+
+            if (!tx) {
+              return {
+                hash,
+                status: "not_found" as const,
+                blockNumber: null,
+                from: null,
+                to: null,
+                gasUsed: null,
+                nonce: null,
+              };
+            }
+
+            if (!receipt) {
+              return {
+                hash,
+                status: "pending" as const,
+                blockNumber: null,
+                from: tx.from,
+                to: tx.to,
+                gasUsed: null,
+                nonce: hexToNumber(tx.nonce),
+              };
+            }
+
+            return {
+              hash,
+              status: (receipt.status === "0x1" ? "mined" : "failed") as
+                | "mined"
+                | "failed",
+              blockNumber: hexToNumber(receipt.blockNumber),
+              from: tx.from,
+              to: tx.to,
+              gasUsed: hexToNumber(receipt.gasUsed),
+              nonce: hexToNumber(tx.nonce),
+            };
+          } catch {
+            return {
+              hash,
+              status: "not_found" as const,
+              blockNumber: null,
+              from: null,
+              to: null,
+              gasUsed: null,
+              nonce: null,
+            };
+          }
+        })
+      );
+      results.push(...batchRes);
+    }
+
+    setBatchResults(results);
+    setBatchLoading(false);
   };
 
   // Nonce diff handler
@@ -891,7 +1168,7 @@ export default function StatusPage() {
       {/* ------------------------------------------------------------------ */}
       <Card
         className={
-          mempoolTxs.length > 0
+          mempoolTxs.length > 0 || globalStuckCount > 0
             ? "border-yellow-500/30 bg-yellow-500/5"
             : ""
         }
@@ -901,12 +1178,14 @@ export default function StatusPage() {
             <CardTitle className="flex items-center gap-2">
               <Inbox className="h-5 w-5" />
               Mempool
-              {mempoolTxs.length > 0 && (
+              {(mempoolTxs.length > 0 || globalStuckCount > 0) && (
                 <Badge
                   variant="outline"
                   className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 animate-pulse ml-1"
                 >
-                  {mempoolTxs.length} pending
+                  {mempoolTxs.length > 0
+                    ? `${mempoolTxs.length} visible`
+                    : `${globalStuckCount} stuck`}
                 </Badge>
               )}
             </CardTitle>
@@ -949,14 +1228,48 @@ export default function StatusPage() {
             </div>
           ) : mempoolTxs.length === 0 ? (
             <div className="text-center py-8">
-              <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">
-                {mempoolSource === "none" || mempoolSource === "error"
-                  ? "Could not query mempool. The RPC node may not expose txpool or pending block data."
-                  : "Mempool is empty. No pending transactions."}
-              </p>
+              {mempoolSource === "nonce_gap_detected" ? (
+                <>
+                  <AlertTriangle className="h-10 w-10 text-red-500/60 mx-auto mb-2" />
+                  <p className="text-sm text-red-300">
+                    {globalStuckCount} stuck transaction{globalStuckCount !== 1 ? "s" : ""} detected
+                    via nonce gap analysis.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    The RPC node does not support txpool methods and its pending block is stale.
+                    Enter a wallet address below to scan for that address&apos;s stuck transactions.
+                  </p>
+                </>
+              ) : mempoolSource === "pending_block_stale" ||
+              mempoolSource === "pending_count_only" ? (
+                <>
+                  <AlertTriangle className="h-10 w-10 text-yellow-500/60 mx-auto mb-2" />
+                  <p className="text-sm text-yellow-300">
+                    {txpoolStatus
+                      ? `${txpoolStatus.pending} pending + ${txpoolStatus.queued} queued transactions detected, but the RPC node does not expose individual transaction data.`
+                      : "Pending transactions detected, but the RPC node does not expose individual transaction data."}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Enter a wallet address below to scan for stuck transactions.
+                  </p>
+                </>
+              ) : mempoolSource === "none" || mempoolSource === "error" ? (
+                <>
+                  <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    Could not query mempool. The RPC node may not expose txpool or pending block data.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    Mempool is empty. No pending transactions.
+                  </p>
+                </>
+              )}
               {mempoolSource !== "none" && mempoolSource !== "error" && (
-                <p className="text-xs text-muted-foreground/60 mt-1">
+                <p className="text-[10px] text-muted-foreground/50 mt-2">
                   Source: {mempoolSource}
                 </p>
               )}
@@ -1049,13 +1362,107 @@ export default function StatusPage() {
                   via{" "}
                   {mempoolSource === "txpool_content"
                     ? "txpool_content"
-                    : mempoolSource === "pending_block"
-                      ? "eth_getBlockByNumber(pending)"
-                      : mempoolSource}
+                    : mempoolSource === "pending_block_index_scan"
+                      ? "eth_getTransactionByBlockNumberAndIndex(pending)"
+                      : mempoolSource === "pending_block"
+                        ? "eth_getBlockByNumber(pending)"
+                        : mempoolSource === "nonce_gap_detected"
+                          ? "eth_getTransactionCount(pending) nonce gap"
+                          : mempoolSource}
                 </span>
               </div>
             </div>
           )}
+
+          {/* Address mempool scanner */}
+          <div className="mt-4 pt-4 border-t border-border/50">
+            <p className="text-sm font-medium mb-1">Scan Address for Stuck Transactions</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              Enter a wallet address to detect its stuck transactions via nonce gap analysis
+              and enumerate any visible pending txs.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                placeholder="0x... wallet address"
+                value={mempoolScanAddr}
+                onChange={(e) => setMempoolScanAddr(e.target.value)}
+                className="font-mono text-sm"
+                onKeyDown={(e) => e.key === "Enter" && runMempoolScan()}
+              />
+              <Button
+                onClick={runMempoolScan}
+                disabled={
+                  !mempoolScanAddr.startsWith("0x") ||
+                  mempoolScanAddr.length !== 42 ||
+                  mempoolScanLoading
+                }
+                variant="outline"
+              >
+                {mempoolScanLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+
+            {mempoolScanResult && (
+              <div className="mt-3 space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <NonceStat label="Confirmed" value={mempoolScanResult.confirmed} />
+                  <NonceStat label="Pending" value={mempoolScanResult.pending} />
+                  <NonceStat
+                    label="Stuck"
+                    value={mempoolScanResult.stuck}
+                    variant={mempoolScanResult.stuck > 0 ? "danger" : "success"}
+                  />
+                </div>
+
+                {mempoolScanResult.stuck > 0 && mempoolScanResult.txs.length === 0 && (
+                  <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-sm text-yellow-300">
+                    {mempoolScanResult.stuck} transaction
+                    {mempoolScanResult.stuck !== 1 ? "s are" : " is"} stuck in the mempool
+                    (nonces {mempoolScanResult.confirmed} through {mempoolScanResult.pending - 1}).
+                    The RPC node does not expose individual pending transaction data for enumeration.
+                  </div>
+                )}
+
+                {mempoolScanResult.stuck === 0 && (
+                  <div className="rounded-md border border-green-500/30 bg-green-500/5 p-3 text-sm text-green-300">
+                    No stuck transactions for this address.
+                  </div>
+                )}
+
+                {mempoolScanResult.txs.length > 0 && (
+                  <div className="space-y-0.5 max-h-[300px] overflow-y-auto">
+                    {mempoolScanResult.txs.map((tx) => (
+                      <div
+                        key={tx.hash}
+                        className="flex items-center gap-3 rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
+                      >
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse shrink-0" />
+                        <span
+                          className="truncate cursor-pointer hover:text-foreground"
+                          title={tx.hash}
+                          onClick={() => {
+                            setTxInput(tx.hash);
+                            setTxResult(null);
+                          }}
+                        >
+                          {truncateHash(tx.hash, 10)}
+                        </span>
+                        <span className="text-muted-foreground">nonce:{tx.nonce}</span>
+                        <span className="text-muted-foreground">
+                          {tx.to ? truncateHash(tx.to) : "CREATE"}
+                        </span>
+                        <span className="ml-auto">{formatEth(tx.value)} ETH</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -1539,9 +1946,9 @@ export default function StatusPage() {
 
                     {txResult.from && (
                       <div className="space-y-1 text-sm">
-                        <TxField label="From" value={txResult.from} mono />
+                        <TxField label="From" value={txResult.from} mono explorerPath={`/address/${txResult.from}`} />
                         {txResult.to && (
-                          <TxField label="To" value={txResult.to} mono />
+                          <TxField label="To" value={txResult.to} mono explorerPath={`/address/${txResult.to}`} />
                         )}
                         {txResult.nonce !== null && (
                           <TxField
@@ -1555,6 +1962,7 @@ export default function StatusPage() {
                             label="Block"
                             value={`#${txResult.blockNumber.toLocaleString()}`}
                             mono
+                            explorerPath={`/block/${txResult.blockNumber}`}
                           />
                         )}
                         {txResult.gasUsed !== null && (
@@ -1647,6 +2055,229 @@ export default function StatusPage() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
+      {/* Batch Hash Checker                                                   */}
+      {/* ------------------------------------------------------------------ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ListChecks className="h-5 w-5" />
+            Batch Transaction Checker
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Paste multiple transaction hashes (one per line, comma or space separated) to check
+            their status in bulk. Useful for verifying a set of stuck transactions.
+          </p>
+          <textarea
+            className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            placeholder={"0xabc123...\n0xdef456...\n0x789abc..."}
+            value={batchHashInput}
+            onChange={(e) => setBatchHashInput(e.target.value)}
+          />
+          <Button
+            onClick={lookupBatch}
+            disabled={!batchHashInput.trim() || batchLoading}
+            variant="outline"
+            className="w-full"
+          >
+            {batchLoading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="mr-2 h-4 w-4" />
+            )}
+            {batchLoading ? "Checking..." : "Check All Hashes"}
+          </Button>
+
+          {batchResults.length > 0 && (
+            <div className="space-y-1">
+              <Separator />
+              {/* Summary */}
+              <div className="flex gap-3 py-2 text-xs">
+                <span className="text-green-400">
+                  {batchResults.filter((r) => r.status === "mined").length} mined
+                </span>
+                <span className="text-yellow-400">
+                  {batchResults.filter((r) => r.status === "pending").length} pending
+                </span>
+                <span className="text-red-400">
+                  {batchResults.filter((r) => r.status === "failed").length} failed
+                </span>
+                <span className="text-gray-400">
+                  {batchResults.filter((r) => r.status === "not_found").length} not found
+                </span>
+              </div>
+
+              {/* Results */}
+              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
+                {batchResults.map((r) => {
+                  const statusColor =
+                    r.status === "mined"
+                      ? "text-green-400"
+                      : r.status === "pending"
+                        ? "text-yellow-400"
+                        : r.status === "failed"
+                          ? "text-red-400"
+                          : "text-gray-400";
+                  const dotColor =
+                    r.status === "mined"
+                      ? "bg-green-500"
+                      : r.status === "pending"
+                        ? "bg-yellow-500"
+                        : r.status === "failed"
+                          ? "bg-red-500"
+                          : "bg-gray-500";
+                  return (
+                    <div
+                      key={r.hash}
+                      className="flex items-center gap-3 rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
+                    >
+                      <span
+                        className={`inline-block h-2 w-2 rounded-full shrink-0 ${dotColor} ${r.status === "pending" ? "animate-pulse" : ""}`}
+                      />
+                      <span
+                        className="truncate flex-1 cursor-pointer hover:text-foreground"
+                        title={r.hash}
+                        onClick={() => {
+                          setTxInput(r.hash);
+                          setTxResult(null);
+                        }}
+                      >
+                        {truncateHash(r.hash, 10)}
+                      </span>
+                      <span className={`uppercase text-[10px] font-bold w-16 text-right ${statusColor}`}>
+                        {r.status === "not_found" ? "N/A" : r.status}
+                      </span>
+                      {r.nonce !== null && (
+                        <span className="text-muted-foreground w-16 text-right">
+                          nonce:{r.nonce}
+                        </span>
+                      )}
+                      {r.from && (
+                        <span className="text-muted-foreground hidden lg:inline">
+                          {truncateHash(r.from)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Contract Registry                                                    */}
+      {/* ------------------------------------------------------------------ */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              AttackRegistry Contracts
+            </CardTitle>
+            {!registryLoading && (
+              <Badge variant="outline" className="text-xs font-mono">
+                {registryContracts.length} total
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {registryLoading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : registryContracts.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              No contracts found in the AttackRegistry, or the node could not return event logs.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {/* State distribution */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ContractState.NOT_DEPLOYED,
+                  ContractState.NEW_DEPLOYMENT,
+                  ContractState.ATTACK_REQUESTED,
+                  ContractState.UNDER_ATTACK,
+                  ContractState.PROMOTION_REQUESTED,
+                  ContractState.PRODUCTION,
+                  ContractState.CORRUPTED,
+                ].map((state) => {
+                  const count = registryContracts.filter(
+                    (c) => c.state === state
+                  ).length;
+                  if (count === 0) return null;
+                  return (
+                    <div key={state} className="flex items-center gap-1.5">
+                      <StateBadge state={state} />
+                      <span className="text-xs font-mono font-bold">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <Separator />
+
+              {/* Contract list */}
+              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
+                <div className="col-span-5">Agreement Address</div>
+                <div className="col-span-3">State</div>
+                <div className="col-span-4 text-right">Actions</div>
+              </div>
+              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
+                {registryContracts
+                  .sort((a, b) => b.state - a.state)
+                  .map((c) => (
+                    <div
+                      key={c.address}
+                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="col-span-5 truncate" title={c.address}>
+                        {c.address}
+                      </div>
+                      <div className="col-span-3">
+                        <StateBadge state={c.state} />
+                      </div>
+                      <div className="col-span-4 flex items-center justify-end gap-1">
+                        <a
+                          href={`${EXPLORER_URL}/address/${c.address}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-[10px] px-2"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </Button>
+                        </a>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[10px] px-2"
+                          onClick={() => {
+                            setScanAddress(c.address);
+                            setScanResult(null);
+                          }}
+                        >
+                          Inspect
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ------------------------------------------------------------------ */}
       {/* Latest Block Details                                                */}
       {/* ------------------------------------------------------------------ */}
       {health.blockInfo && (
@@ -1664,22 +2295,25 @@ export default function StatusPage() {
                   [
                     "Block Number",
                     `#${health.blockInfo.number.toLocaleString()}`,
+                    `${EXPLORER_URL}/block/${health.blockInfo.number}`,
                   ],
-                  ["Block Hash", health.blockInfo.hash],
+                  ["Block Hash", health.blockInfo.hash, `${EXPLORER_URL}/block/${health.blockInfo.hash}`],
                   [
                     "Timestamp",
                     new Date(
                       health.blockInfo.timestamp * 1000
                     ).toISOString(),
+                    null,
                   ],
-                  ["Miner / Sequencer", health.blockInfo.miner],
-                  ["Transactions", String(health.blockInfo.txCount)],
+                  ["Miner / Sequencer", health.blockInfo.miner, `${EXPLORER_URL}/address/${health.blockInfo.miner}`],
+                  ["Transactions", String(health.blockInfo.txCount), null],
                   [
                     "Gas Used",
                     `${health.blockInfo.gasUsed.toLocaleString()} / ${health.blockInfo.gasLimit.toLocaleString()}`,
+                    null,
                   ],
-                ] as [string, string][]
-              ).map(([label, value]) => (
+                ] as [string, string, string | null][]
+              ).map(([label, value, link]) => (
                 <div
                   key={label}
                   className="flex flex-col gap-0.5 rounded-lg border p-3"
@@ -1687,7 +2321,19 @@ export default function StatusPage() {
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
                     {label}
                   </span>
-                  <span className="font-mono text-xs break-all">{value}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs break-all flex-1">{value}</span>
+                    {link && (
+                      <a
+                        href={link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1743,19 +2389,31 @@ function TxField({
   label,
   value,
   mono,
+  explorerPath,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  explorerPath?: string;
 }) {
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-2 items-center">
       <span className="text-muted-foreground w-16 shrink-0 text-xs">
         {label}:
       </span>
-      <span className={`break-all text-xs ${mono ? "font-mono" : ""}`}>
+      <span className={`break-all text-xs flex-1 ${mono ? "font-mono" : ""}`}>
         {value}
       </span>
+      {explorerPath && (
+        <a
+          href={`${EXPLORER_URL}${explorerPath}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      )}
     </div>
   );
 }
