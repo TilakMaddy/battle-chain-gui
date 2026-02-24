@@ -25,12 +25,8 @@ import {
   Inbox,
   Layers,
   ListChecks,
-  Shield,
   ExternalLink,
 } from "lucide-react";
-import { CONTRACTS } from "@/lib/contracts/addresses";
-import { ContractState } from "@/lib/contracts/types";
-import { StateBadge } from "@/components/web3/state-badge";
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL ?? "https://testnet.battlechain.com:3051";
 const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer.testnet.battlechain.com";
@@ -103,12 +99,15 @@ interface BlockInfo {
 
 interface ChainHealth {
   status: "operational" | "degraded" | "down" | "loading";
+  statusReason: string;
   blockAge: number;
   blockInfo: BlockInfo | null;
   syncing: boolean | { currentBlock: number; highestBlock: number };
   chainId: number | null;
   pendingTxCount: number;
   blockTime: number | null;
+  mempoolStuck: number;
+  sequencerNonceGap: number;
 }
 
 interface MempoolTx {
@@ -485,12 +484,15 @@ async function probeRpcLatency(): Promise<RpcLatency[]> {
 export default function StatusPage() {
   const [health, setHealth] = useState<ChainHealth>({
     status: "loading",
+    statusReason: "",
     blockAge: 0,
     blockInfo: null,
     syncing: false,
     chainId: null,
     pendingTxCount: 0,
     blockTime: null,
+    mempoolStuck: 0,
+    sequencerNonceGap: 0,
   });
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -553,11 +555,7 @@ export default function StatusPage() {
   } | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
 
-  // Contract registry
-  const [registryContracts, setRegistryContracts] = useState<
-    { address: string; state: ContractState }[]
-  >([]);
-  const [registryLoading, setRegistryLoading] = useState(true);
+
 
   // Pulse counter for the live dot
   const pulseRef = useRef(0);
@@ -600,21 +598,93 @@ export default function StatusPage() {
         }
       }
 
+      // --- Multi-signal health detection ---
       const now = Math.floor(Date.now() / 1000);
       const blockAge = now - block.timestamp;
 
+      // Signal 1: Sequencer nonce gap (confirmed vs pending)
+      let sequencerNonceGap = 0;
+      try {
+        const [confirmedHex, pendingHex] = await Promise.all([
+          rpc("eth_getTransactionCount", [block.miner, "latest"]),
+          rpc("eth_getTransactionCount", [block.miner, "pending"]),
+        ]);
+        const confirmed = hexToNumber(confirmedHex);
+        const pending = hexToNumber(pendingHex);
+        sequencerNonceGap = pending - confirmed;
+      } catch {
+        // ignore — node may not support pending nonce
+      }
+
+      // Signal 2: Global mempool stuck count (pending block txs vs latest block txs)
+      let mempoolStuck = 0;
+      try {
+        const latestCountHex = await rpc("eth_getBlockTransactionCountByNumber", ["latest"]);
+        const pendingCount = hexToNumber(pendingCountHex);
+        const latestCount = hexToNumber(latestCountHex);
+        // If pending block has fewer or same txs as latest, check nonce-based detection
+        if (pendingCount <= latestCount) {
+          // Use the reporter address from bug report as a canary
+          // Actually, just check if pending > latest for any signal
+          mempoolStuck = 0;
+        } else {
+          mempoolStuck = pendingCount - latestCount;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Determine status from multiple signals
       let status: ChainHealth["status"] = "operational";
-      if (blockAge > 300) status = "down";
-      else if (blockAge > 60) status = "degraded";
+      const reasons: string[] = [];
+
+      // Block age is the primary signal
+      if (blockAge > 300) {
+        status = "down";
+        reasons.push(`No new blocks for ${formatAge(blockAge)}`);
+      } else if (blockAge > 60) {
+        status = "degraded";
+        reasons.push(`Last block ${formatAge(blockAge)} ago`);
+      }
+
+      // Sequencer nonce gap: if the sequencer itself has stuck txs, chain is stalled
+      if (sequencerNonceGap > 0) {
+        if (status === "operational") status = "degraded";
+        reasons.push(`Sequencer has ${sequencerNonceGap} unconfirmed tx${sequencerNonceGap > 1 ? "s" : ""}`);
+      }
+
+      // Pending block has more txs than latest = txs waiting to be sealed
+      if (mempoolStuck > 0) {
+        if (status === "operational") status = "degraded";
+        reasons.push(`${mempoolStuck} tx${mempoolStuck > 1 ? "s" : ""} pending in mempool`);
+      }
+
+      // If block age is severe AND there are stuck txs, escalate to down
+      if (blockAge > 120 && (sequencerNonceGap > 0 || mempoolStuck > 0)) {
+        status = "down";
+      }
+
+      // If syncing, always degraded at minimum
+      if (syncResult !== false && status === "operational") {
+        status = "degraded";
+        reasons.push("Node is syncing");
+      }
+
+      const statusReason = reasons.length > 0
+        ? reasons.join(" · ")
+        : "Chain is producing blocks normally.";
 
       setHealth({
         status,
+        statusReason,
         blockAge,
         blockInfo: block,
         syncing: syncResult === false ? false : syncResult,
         chainId: hexToNumber(chainIdHex),
         pendingTxCount: hexToNumber(pendingCountHex),
         blockTime,
+        mempoolStuck,
+        sequencerNonceGap,
       });
 
       setBlockAgeHistory((prev) => [...prev.slice(-29), blockAge]);
@@ -735,67 +805,11 @@ export default function StatusPage() {
     }
   };
 
-  // Fetch contracts from AttackRegistry via event logs
-  const fetchRegistry = useCallback(async () => {
-    setRegistryLoading(true);
-    try {
-      // Query all logs from AttackRegistry — the contract address narrows it enough.
-      // Event: AgreementStateChanged(address indexed agreementAddress, uint8 previousState, uint8 newState)
-      // topic[1] = agreementAddress (indexed), data = abi.encode(uint8 prevState, uint8 newState)
-      const logs = await rpc("eth_getLogs", [
-        {
-          address: CONTRACTS.AttackRegistry,
-          fromBlock: "0x0",
-          toBlock: "latest",
-        },
-      ]);
-
-      const map = new Map<string, ContractState>();
-      for (const log of logs) {
-        try {
-          const topics = log.topics;
-          if (!topics || topics.length < 2) continue;
-          // topic[1] = indexed agreementAddress (left-padded to 32 bytes)
-          const addr = "0x" + topics[1].slice(26);
-          // data contains two uint8s encoded as 32-byte words:
-          //   bytes 0-31: previousState, bytes 32-63: newState
-          const data: string = log.data;
-          let newState: number;
-          if (data.length >= 130) {
-            // Full 64 bytes (0x + 128 hex chars): parse second word
-            newState = parseInt(data.slice(66, 130), 16);
-          } else if (data.length >= 66) {
-            // Single word
-            newState = parseInt(data.slice(2, 66), 16);
-          } else {
-            newState = parseInt(data.slice(-2), 16);
-          }
-          if (newState >= 0 && newState <= 6) {
-            map.set(addr.toLowerCase(), newState as ContractState);
-          }
-        } catch {
-          // skip malformed log
-        }
-      }
-
-      const contracts = Array.from(map.entries()).map(([address, state]) => ({
-        address,
-        state,
-      }));
-      setRegistryContracts(contracts);
-    } catch {
-      // ignore
-    } finally {
-      setRegistryLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     fetchHealth();
     fetchMempool();
     fetchBlocks();
     runLatencyProbe();
-    fetchRegistry();
     const healthInterval = setInterval(fetchHealth, 10_000);
     const mempoolInterval = setInterval(fetchMempool, 12_000);
     const latencyInterval = setInterval(runLatencyProbe, 15_000);
@@ -809,7 +823,7 @@ export default function StatusPage() {
       clearInterval(latencyInterval);
       clearInterval(pulseInterval);
     };
-  }, [fetchHealth, fetchMempool, fetchBlocks, runLatencyProbe, fetchRegistry]);
+  }, [fetchHealth, fetchMempool, fetchBlocks, runLatencyProbe]);
 
   // Re-fetch blocks whenever latest block changes
   useEffect(() => {
@@ -1086,14 +1100,9 @@ export default function StatusPage() {
                 {sc.label}
               </h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {health.status === "operational" &&
-                  "Chain is producing blocks normally."}
-                {health.status === "degraded" &&
-                  "Block production is slow. Transactions may be delayed."}
-                {health.status === "down" &&
-                  "Block production has stalled. Transactions are stuck in the mempool."}
-                {health.status === "loading" &&
-                  "Connecting to RPC endpoint..."}
+                {health.status === "loading"
+                  ? "Connecting to RPC endpoint..."
+                  : health.statusReason}
               </p>
             </div>
           </div>
@@ -2405,115 +2414,6 @@ export default function StatusPage() {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Contract Registry                                                    */}
-      {/* ------------------------------------------------------------------ */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              AttackRegistry Contracts
-            </CardTitle>
-            {!registryLoading && (
-              <Badge variant="outline" className="text-xs font-mono">
-                {registryContracts.length} total
-              </Badge>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {registryLoading ? (
-            <div className="space-y-2">
-              {[...Array(3)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : registryContracts.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">
-              No contracts found in the AttackRegistry, or the node could not return event logs.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {/* State distribution */}
-              <div className="flex flex-wrap gap-2">
-                {[
-                  ContractState.NOT_DEPLOYED,
-                  ContractState.NEW_DEPLOYMENT,
-                  ContractState.ATTACK_REQUESTED,
-                  ContractState.UNDER_ATTACK,
-                  ContractState.PROMOTION_REQUESTED,
-                  ContractState.PRODUCTION,
-                  ContractState.CORRUPTED,
-                ].map((state) => {
-                  const count = registryContracts.filter(
-                    (c) => c.state === state
-                  ).length;
-                  return (
-                    <div key={state} className={`flex items-center gap-1.5 ${count === 0 ? "opacity-40" : ""}`}>
-                      <StateBadge state={state} />
-                      <span className="text-xs font-mono font-bold">{count}</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <Separator />
-
-              {/* Contract list */}
-              <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-1">
-                <div className="col-span-5">Agreement Address</div>
-                <div className="col-span-3">State</div>
-                <div className="col-span-4 text-right">Actions</div>
-              </div>
-              <div className="max-h-[400px] overflow-y-auto space-y-0.5">
-                {registryContracts
-                  .sort((a, b) => b.state - a.state)
-                  .map((c) => (
-                    <div
-                      key={c.address}
-                      className="grid grid-cols-12 gap-2 items-center rounded-md px-3 py-2 text-xs font-mono hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="col-span-5 truncate" title={c.address}>
-                        {c.address}
-                      </div>
-                      <div className="col-span-3">
-                        <StateBadge state={c.state} />
-                      </div>
-                      <div className="col-span-4 flex items-center justify-end gap-1">
-                        <a
-                          href={`${EXPLORER_URL}/address/${c.address}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-[10px] px-2"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Button>
-                        </a>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 text-[10px] px-2"
-                          onClick={() => {
-                            setScanAddress(c.address);
-                            setScanResult(null);
-                          }}
-                        >
-                          Inspect
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
               </div>
             </div>
           )}

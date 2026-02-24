@@ -1,8 +1,14 @@
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required env variable: ${name}`);
+  return value;
+}
+
 export const CONTRACTS = {
-  AttackRegistry: "0x9E62988ccA776ff6613Fa68D34c9AB5431Ce57e1",
-  SafeHarborRegistry: "0xCb2A561395118895e2572A04C2D8AB8eCA8d7E5D",
-  AgreementFactory: "0x0EbBEeB3aBeF51801a53Fdd1fb263Ac0f2E3Ed36",
-  BattleChainDeployer: "0x8f57054CBa2021bEE15631067dd7B7E0B43F17Dc",
+  AttackRegistry: requireEnv("NEXT_PUBLIC_ATTACK_REGISTRY"),
+  SafeHarborRegistry: requireEnv("NEXT_PUBLIC_SAFE_HARBOR_REGISTRY"),
+  AgreementFactory: requireEnv("NEXT_PUBLIC_AGREEMENT_FACTORY"),
+  BattleChainDeployer: requireEnv("NEXT_PUBLIC_BATTLECHAIN_DEPLOYER"),
 } as const;
 
 export const BATTLECHAIN_CAIP2 = "eip155:627";

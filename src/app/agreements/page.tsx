@@ -8,13 +8,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -25,7 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { StateBadge } from "@/components/web3/state-badge";
 import { CONTRACTS } from "@/lib/contracts/addresses";
-import { ContractState, CONTRACT_STATE_LABELS } from "@/lib/contracts/types";
+import { ContractState } from "@/lib/contracts/types";
 import { useDeployments } from "@/lib/hooks/use-deployments";
 import { FileText, Search, Plus, ExternalLink, Rocket } from "lucide-react";
 
@@ -62,7 +55,18 @@ function AgreementsContent() {
   const { deployments } = useDeployments();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [stateFilter, setStateFilter] = useState<string>("all");
+  const [activeStates, setActiveStates] = useState<Set<ContractState>>(new Set());
+
+  const toggleState = (state: ContractState) => {
+    setActiveStates((prev) => {
+      const next = new Set(prev);
+      if (next.has(state)) next.delete(state);
+      else next.add(state);
+      return next;
+    });
+  };
+
+  const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer.testnet.battlechain.com";
 
   useEffect(() => {
     async function fetchAgreements() {
@@ -75,29 +79,43 @@ function AgreementsContent() {
           },
         ]);
 
+        // Known event signatures from AttackRegistry
+        const SIG_STATE_CHANGED = "0xf7e4eae80290e2a6acfee094f30d26c550648115112acc13da4e0efb47a7d5cd";
+        const SIG_REGISTERED = "0x768fb430a0d4b201cb764ab221c316dd14d8babf2e4b2348e05964c6565318b6";
+
         const map = new Map<`0x${string}`, AgreementRow>();
         for (const log of logs) {
-          // AgreementStateChanged: topic[0] = event sig, topic[1] = indexed agreementAddress
-          if (!log.topics || log.topics.length < 2) continue;
-          const addr = ("0x" + log.topics[1].slice(26)) as `0x${string}`;
-
-          // data contains abi.encode(uint8 prevState, uint8 newState)
-          let newState = 0;
-          const data: string = log.data ?? "0x";
-          if (data.length >= 130) {
-            newState = parseInt(data.slice(66, 130), 16);
-          } else if (data.length >= 66) {
-            newState = parseInt(data.slice(2, 66), 16);
-          } else if (data.length > 2) {
-            newState = parseInt(data.slice(-2), 16);
-          }
-
+          const topics = log.topics;
+          if (!topics || topics.length < 2) continue;
+          const sig = topics[0];
           const blockNumber = BigInt(log.blockNumber);
-          map.set(addr, {
-            address: addr,
-            latestState: newState as ContractState,
-            blockNumber,
-          });
+
+          if (sig === SIG_REGISTERED) {
+            // ContractRegistered(address indexed contractAddress, address indexed agreementAddress)
+            const addr = ("0x" + topics[1].slice(26)) as `0x${string}`;
+            if (!map.has(addr)) {
+              map.set(addr, {
+                address: addr,
+                latestState: ContractState.NEW_DEPLOYMENT,
+                blockNumber,
+              });
+            }
+          } else if (sig === SIG_STATE_CHANGED) {
+            // AgreementStateChanged(address indexed agreementAddress, ContractState newState)
+            const addr = ("0x" + topics[1].slice(26)) as `0x${string}`;
+            const data: string = log.data ?? "0x";
+            let newState = 0;
+            if (data.length >= 66) {
+              newState = parseInt(data.slice(2, 66), 16);
+            }
+            if (newState >= 0 && newState <= 6) {
+              map.set(addr, {
+                address: addr,
+                latestState: newState as ContractState,
+                blockNumber,
+              });
+            }
+          }
         }
         setAgreements(
           Array.from(map.values()).sort((a, b) => Number(b.blockNumber - a.blockNumber))
@@ -113,7 +131,7 @@ function AgreementsContent() {
 
   const filtered = agreements.filter((a) => {
     const matchesSearch = !search || a.address.toLowerCase().includes(search.toLowerCase());
-    const matchesState = stateFilter === "all" || a.latestState === Number(stateFilter);
+    const matchesState = activeStates.size === 0 || activeStates.has(a.latestState);
     return matchesSearch && matchesState;
   });
 
@@ -127,9 +145,42 @@ function AgreementsContent() {
         </Link>
       </PageHeader>
 
-      {/* Filters */}
-      <div className="flex gap-4">
-        <div className="relative flex-1">
+      {/* State badges + search */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {[
+            ContractState.NEW_DEPLOYMENT,
+            ContractState.ATTACK_REQUESTED,
+            ContractState.UNDER_ATTACK,
+            ContractState.PROMOTION_REQUESTED,
+            ContractState.PRODUCTION,
+            ContractState.CORRUPTED,
+          ].map((state) => {
+            const count = agreements.filter((a) => a.latestState === state).length;
+            const isActive = activeStates.has(state);
+            return (
+              <button
+                key={state}
+                onClick={() => toggleState(state)}
+                className={`flex items-center gap-1.5 transition-opacity ${
+                  activeStates.size > 0 && !isActive ? "opacity-30" : ""
+                } ${count === 0 && !isActive ? "opacity-40" : ""}`}
+              >
+                <StateBadge state={state} />
+                <span className="text-xs font-mono font-bold">{count}</span>
+              </button>
+            );
+          })}
+          {activeStates.size > 0 && (
+            <button
+              onClick={() => setActiveStates(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors ml-2"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+        <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search by address..."
@@ -138,19 +189,6 @@ function AgreementsContent() {
             className="pl-10 font-mono"
           />
         </div>
-        <Select value={stateFilter} onValueChange={setStateFilter}>
-          <SelectTrigger className="w-52">
-            <SelectValue placeholder="Filter by state" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All States</SelectItem>
-            {Object.entries(CONTRACT_STATE_LABELS).map(([k, v]) => (
-              <SelectItem key={k} value={k}>
-                {v}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* My Deployed Contracts */}
@@ -234,11 +272,22 @@ function AgreementsContent() {
                       {a.blockNumber.toString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Link href={`/agreements/${a.address}`}>
-                        <Button variant="ghost" size="sm">
-                          View <ExternalLink className="ml-1 h-3 w-3" />
-                        </Button>
-                      </Link>
+                      <div className="flex items-center justify-end gap-1">
+                        <a
+                          href={`${EXPLORER_URL}/address/${a.address}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Button variant="ghost" size="sm">
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Button>
+                        </a>
+                        <Link href={`/agreements/${a.address}`}>
+                          <Button variant="ghost" size="sm">
+                            Inspect
+                          </Button>
+                        </Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

@@ -1,8 +1,14 @@
 import { defineChain } from "viem";
 
-const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL ?? "https://testnet.battlechain.com:3051";
-const explorerUrl = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer.testnet.battlechain.com";
-const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 627);
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required env variable: ${name}`);
+  return value;
+}
+
+const rpcUrl = requireEnv("NEXT_PUBLIC_RPC_URL");
+const explorerUrl = requireEnv("NEXT_PUBLIC_EXPLORER_URL");
+const chainId = Number(requireEnv("NEXT_PUBLIC_CHAIN_ID"));
 
 export const battlechain = defineChain({
   id: chainId,
