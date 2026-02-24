@@ -22,3 +22,5 @@ services:
       - BATTLECHAIN_DEPLOYER=${BATTLECHAIN_DEPLOYER:-0x8f57054CBa2021bEE15631067dd7B7E0B43F17Dc}
     restart: unless-stopped
 ```
+
+Visit `http://localhost:3000` to access Battle Chain!
