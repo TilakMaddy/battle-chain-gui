@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { join } from "path";
 
-const DB_PATH = join(process.cwd(), "battlechain.db");
+const DB_PATH = join(process.cwd(), "db", "battlechain.db");
 
 let _db: Database.Database | null = null;
 

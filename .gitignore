@@ -41,6 +41,4 @@ yarn-error.log*
 next-env.d.ts
 
 # local db
-battlechain.db
-battlechain.db-shm
-battlechain.db-wal
+db/
