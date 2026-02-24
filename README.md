@@ -13,7 +13,7 @@ Web interface for the Battle Chain Safe Harbor protocol. Browse, create, and man
 ```yaml
 services:
   battle-chain:
-    image: tfeoatmilk/battle-chain-gui:latest
+    image: tfeoatmilk/battle-chain-gui
     ports:
       - "3000:3000"
     volumes:
