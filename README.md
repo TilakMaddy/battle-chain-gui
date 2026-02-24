@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Battle Chain
 
-## Getting Started
+Web interface for the Battle Chain Safe Harbor protocol. Browse, create, and manage Safe Harbor agreements, view registered attacks, and compile Solidity contracts.
 
-First, run the development server:
+## Self-Hosting
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+### Prerequisites
+
+- Docker and Docker Compose
+
+### 1. Create a `docker-compose.yaml`
+
+```yaml
+services:
+  battle-chain:
+    image: ${IMAGE:-battle-chain:latest}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./db:/app/db
+    environment:
+      - RPC_URL=${RPC_URL:-https://testnet.battlechain.com:3051}
+      - CHAIN_ID=${CHAIN_ID:-627}
+      - EXPLORER_URL=${EXPLORER_URL:-https://explorer.testnet.battlechain.com}
+      - ATTACK_REGISTRY=${ATTACK_REGISTRY:-0x9E62988ccA776ff6613Fa68D34c9AB5431Ce57e1}
+      - SAFE_HARBOR_REGISTRY=${SAFE_HARBOR_REGISTRY:-0xCb2A561395118895e2572A04C2D8AB8eCA8d7E5D}
+      - AGREEMENT_FACTORY=${AGREEMENT_FACTORY:-0x0EbBEeB3aBeF51801a53Fdd1fb263Ac0f2E3Ed36}
+      - BATTLECHAIN_DEPLOYER=${BATTLECHAIN_DEPLOYER:-0x8f57054CBa2021bEE15631067dd7B7E0B43F17Dc}
+    restart: unless-stopped
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Start
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+docker compose up -d
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Troubleshooting
 
-## Learn More
+**App shows blank page or broken links** — Check that all environment variables are set. Missing or incorrect values will cause the client to fail silently.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**SQLite errors** — Ensure `db/` is writable by UID 1001: `sudo chown -R 1001:1001 ./db`
