@@ -43,6 +43,8 @@ import Link from "next/link";
 type Step = "configure" | "signing" | "confirming" | "complete" | "failed";
 type DeployMethod = "create" | "create2" | "create3";
 
+const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer.testnet.battlechain.com";
+
 export default function DeployPage() {
   return (
     <ChainGuard>
@@ -461,14 +463,28 @@ function DeployContent() {
 
             {deployedAddress && (
               <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4 w-full max-w-lg">
-                <p className="text-sm font-medium mb-1">Deployed Contract Address:</p>
-                <p className="font-mono text-sm break-all text-green-400">{deployedAddress}</p>
+                <p className="text-sm font-medium mb-1">Deployed Contract</p>
+                <a
+                  href={`${EXPLORER_URL}/address/${deployedAddress}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-sm break-all text-green-400 hover:underline"
+                >
+                  {deployedAddress}
+                </a>
               </div>
             )}
 
             <div className="rounded-lg border p-4 bg-muted/50 w-full max-w-lg">
-              <p className="text-sm font-medium mb-1">Transaction Hash:</p>
-              <p className="font-mono text-sm break-all text-blue-400">{txHash}</p>
+              <p className="text-sm font-medium mb-1">Transaction</p>
+              <a
+                href={`${EXPLORER_URL}/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-sm break-all text-blue-400 hover:underline"
+              >
+                {txHash}
+              </a>
             </div>
 
             <p className="text-sm text-muted-foreground">

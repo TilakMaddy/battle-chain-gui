@@ -2,7 +2,7 @@
 
 import { useReadContract, useWriteContract, usePublicClient } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
-import { decodeFunctionData } from "viem";
+import { decodeFunctionData, decodeEventLog } from "viem";
 import {
   agreementFactoryAbi,
   agreementAbi,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/contracts/abis";
 import { CONTRACTS, BATTLECHAIN_CAIP2 } from "@/lib/contracts/addresses";
 import { useCallback } from "react";
-import { toast } from "sonner";
+import { txToast } from "@/lib/utils";
 import type { AgreementDetails, Contact, BountyTerms, ScopeChain, ScopeAccount } from "@/lib/contracts/types";
 
 const factoryAddress = CONTRACTS.AgreementFactory as `0x${string}`;
@@ -59,6 +59,7 @@ export function useAssetRecoveryAddress(
 
 export function useCreateAgreement() {
   const { writeContractAsync, isPending } = useWriteContract();
+  const publicClient = usePublicClient();
 
   const createAgreement = useCallback(
     async (details: AgreementDetails, owner: `0x${string}`, salt: `0x${string}`) => {
@@ -95,12 +96,33 @@ export function useCreateAgreement() {
           salt,
         ],
       });
-      toast.success("Agreement created", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
-      return hash;
+
+      // Wait for receipt and parse AgreementCreated event to get deployed address
+      let agreementAddress: `0x${string}` | null = null;
+      if (publicClient) {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        for (const log of receipt.logs) {
+          if (log.address.toLowerCase() !== factoryAddress.toLowerCase()) continue;
+          try {
+            const decoded = decodeEventLog({
+              abi: agreementFactoryAbi,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (decoded.eventName === "AgreementCreated") {
+              agreementAddress = (decoded.args as { agreementAddress: `0x${string}` }).agreementAddress;
+              break;
+            }
+          } catch {
+            // not the event we're looking for
+          }
+        }
+      }
+
+      txToast("Agreement created", hash);
+      return { hash, agreementAddress };
     },
-    [writeContractAsync]
+    [writeContractAsync, publicClient]
   );
 
   return { createAgreement, isPending };
@@ -117,9 +139,7 @@ export function useExtendCommitmentWindow() {
         functionName: "extendCommitmentWindow",
         args: [newCantChangeUntil],
       });
-      toast.success("Commitment window extended", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Commitment window extended", hash);
       return hash;
     },
     [writeContractAsync]
@@ -139,9 +159,7 @@ export function useAdoptSafeHarbor() {
         functionName: "adoptSafeHarbor",
         args: [agreementAddress],
       });
-      toast.success("Safe Harbor adopted", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Safe Harbor adopted", hash);
       return hash;
     },
     [writeContractAsync]
@@ -272,9 +290,7 @@ export function useSetProtocolName() {
         functionName: "setProtocolName",
         args: [name],
       });
-      toast.success("Protocol name updated", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Protocol name updated", hash);
       return hash;
     },
     [writeContractAsync]
@@ -294,9 +310,7 @@ export function useSetContactDetails() {
         functionName: "setContactDetails",
         args: [contacts.map((c) => ({ name: c.name, contact: c.contact }))],
       });
-      toast.success("Contact details updated", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Contact details updated", hash);
       return hash;
     },
     [writeContractAsync]
@@ -325,9 +339,7 @@ export function useSetBountyTerms() {
           },
         ],
       });
-      toast.success("Bounty terms updated", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Bounty terms updated", hash);
       return hash;
     },
     [writeContractAsync]
@@ -347,9 +359,7 @@ export function useSetAgreementURI() {
         functionName: "setAgreementURI",
         args: [uri],
       });
-      toast.success("Agreement URI updated", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Agreement URI updated", hash);
       return hash;
     },
     [writeContractAsync]
@@ -378,9 +388,7 @@ export function useAddOrSetChains() {
           })),
         ],
       });
-      toast.success("Chains updated", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Chains updated", hash);
       return hash;
     },
     [writeContractAsync]
@@ -410,9 +418,7 @@ export function useAddAccounts() {
           })),
         ],
       });
-      toast.success("Accounts added", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Accounts added", hash);
       return hash;
     },
     [writeContractAsync]
@@ -436,9 +442,7 @@ export function useRemoveAccounts() {
         functionName: "removeAccounts",
         args: [caip2ChainId, accountAddresses],
       });
-      toast.success("Accounts removed", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Accounts removed", hash);
       return hash;
     },
     [writeContractAsync]
@@ -458,9 +462,7 @@ export function useRemoveChains() {
         functionName: "removeChains",
         args: [caip2ChainIds],
       });
-      toast.success("Chains removed", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Chains removed", hash);
       return hash;
     },
     [writeContractAsync]
@@ -480,9 +482,7 @@ export function useTransferOwnership() {
         functionName: "transferOwnership",
         args: [newOwner],
       });
-      toast.success("Ownership transfer initiated", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Ownership transfer initiated", hash);
       return hash;
     },
     [writeContractAsync]
@@ -501,9 +501,7 @@ export function useRenounceOwnership() {
         abi: agreementAbi,
         functionName: "renounceOwnership",
       });
-      toast.success("Ownership renounced", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Ownership renounced", hash);
       return hash;
     },
     [writeContractAsync]

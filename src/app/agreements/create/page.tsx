@@ -78,11 +78,14 @@ export default function CreateAgreementPage() {
   );
 }
 
+const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "https://explorer.testnet.battlechain.com";
+
 function CreateAgreementContent() {
   const { address } = useAccount();
   const [step, setStep] = useState<WizardStep>(0);
   const [submitting, setSubmitting] = useState(false);
   const [agreementAddr, setAgreementAddr] = useState("");
+  const [createTxHash, setCreateTxHash] = useState("");
 
   const { createAgreement, isPending: creating } = useCreateAgreement();
   const { extend, isPending: extending } = useExtendCommitmentWindow();
@@ -146,7 +149,7 @@ function CreateAgreementContent() {
 
       // TX 1: Create agreement
       toast.info("Step 1/3: Creating agreement...");
-      await createAgreement(
+      const { hash, agreementAddress } = await createAgreement(
         {
           protocolName: form.protocolName,
           contactDetails: form.contacts,
@@ -171,10 +174,28 @@ function CreateAgreementContent() {
         salt
       );
 
-      // For the remaining TXs we need the agreement address from the event.
-      // In a production app we'd parse the tx receipt logs. For now, prompt user.
-      toast.info("Agreement created! Check your wallet for the next transactions.");
-      setAgreementAddr("pending");
+      setCreateTxHash(hash);
+
+      if (!agreementAddress) {
+        toast.error("Could not parse agreement address from transaction logs.");
+        setAgreementAddr("pending");
+        return;
+      }
+
+      setAgreementAddr(agreementAddress);
+
+      // TX 2: Extend commitment window
+      toast.info("Step 2/3: Extending commitment window...");
+      const nowSec = BigInt(Math.floor(Date.now() / 1000));
+      const days = BigInt(form.commitmentDays) * 86400n;
+      await extend(agreementAddress, nowSec + days);
+
+      // TX 3: Adopt Safe Harbor
+      toast.info("Step 3/3: Adopting Safe Harbor...");
+      await adopt(agreementAddress);
+
+      toast.success("All 3 transactions complete!");
+      setStep(4 as WizardStep);
     } catch (err: unknown) {
       console.error(err);
       const msg =
@@ -658,7 +679,32 @@ function CreateAgreementContent() {
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <CheckCircle className="h-12 w-12 text-green-500" />
             <p className="text-lg font-medium">Agreement Setup Complete!</p>
-            <p className="font-mono text-sm text-blue-400">{agreementAddr}</p>
+            <div className="space-y-3 w-full max-w-lg">
+              <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4">
+                <p className="text-sm font-medium mb-1">Deployed Contract</p>
+                <a
+                  href={`${EXPLORER_URL}/address/${agreementAddr}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-sm break-all text-green-400 hover:underline"
+                >
+                  {agreementAddr}
+                </a>
+              </div>
+              {createTxHash && (
+                <div className="rounded-lg border p-4 bg-muted/50">
+                  <p className="text-sm font-medium mb-1">Transaction</p>
+                  <a
+                    href={`${EXPLORER_URL}/tx/${createTxHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-sm break-all text-blue-400 hover:underline"
+                  >
+                    {createTxHash}
+                  </a>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}

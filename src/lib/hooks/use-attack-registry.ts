@@ -6,7 +6,7 @@ import { CONTRACTS } from "@/lib/contracts/addresses";
 import { ContractState } from "@/lib/contracts/types";
 import type { AgreementInfo } from "@/lib/contracts/types";
 import { useCallback, useState } from "react";
-import { toast } from "sonner";
+import { txToast } from "@/lib/utils";
 
 const registryAddress = CONTRACTS.AttackRegistry as `0x${string}`;
 
@@ -49,9 +49,7 @@ export function useRequestAttackMode() {
         functionName: "requestUnderAttack",
         args: [agreementAddress],
       });
-      toast.success("Attack mode requested", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Attack mode requested", hash);
       return hash;
     },
     [writeContractAsync]
@@ -71,9 +69,7 @@ export function useApproveAttack() {
         functionName: "approveAttackRequest",
         args: [agreementAddress],
       });
-      toast.success("Attack request approved", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Attack request approved", hash);
       return hash;
     },
     [writeContractAsync]
@@ -93,9 +89,7 @@ export function useRejectAttack() {
         functionName: "rejectAttackRequest",
         args: [agreementAddress],
       });
-      toast.success("Attack request rejected", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Attack request rejected", hash);
       return hash;
     },
     [writeContractAsync]
@@ -115,9 +109,7 @@ export function useRequestPromotion() {
         functionName: "requestPromotion",
         args: [agreementAddress],
       });
-      toast.success("Promotion requested", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Promotion requested", hash);
       return hash;
     },
     [writeContractAsync]
@@ -137,9 +129,7 @@ export function usePromote() {
         functionName: "promote",
         args: [agreementAddress],
       });
-      toast.success("Agreement promoted", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Agreement promoted", hash);
       return hash;
     },
     [writeContractAsync]
@@ -159,9 +149,7 @@ export function useCancelPromotion() {
         functionName: "cancelPromotion",
         args: [agreementAddress],
       });
-      toast.success("Promotion cancelled", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Promotion cancelled", hash);
       return hash;
     },
     [writeContractAsync]
@@ -274,9 +262,7 @@ export function useGoToProduction() {
         functionName: "goToProduction",
         args: [agreementAddress],
       });
-      toast.success("Moved to production", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Moved to production", hash);
       return hash;
     },
     [writeContractAsync]
@@ -296,9 +282,7 @@ export function useMarkCorrupted() {
         functionName: "markCorrupted",
         args: [agreementAddress],
       });
-      toast.success("Agreement marked as corrupted", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Agreement marked as corrupted", hash);
       return hash;
     },
     [writeContractAsync]
@@ -318,9 +302,7 @@ export function useTransferAttackModerator() {
         functionName: "transferAttackModerator",
         args: [agreementAddress, newModerator],
       });
-      toast.success("Attack moderator transferred", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Attack moderator transferred", hash);
       return hash;
     },
     [writeContractAsync]
@@ -340,9 +322,7 @@ export function useAuthorizeAgreementOwner() {
         functionName: "authorizeAgreementOwner",
         args: [contractAddress, newOwner],
       });
-      toast.success("Agreement owner authorized", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Agreement owner authorized", hash);
       return hash;
     },
     [writeContractAsync]
@@ -362,9 +342,7 @@ export function useInstantPromote() {
         functionName: "instantPromote",
         args: [agreementAddress],
       });
-      toast.success("Agreement instantly promoted", {
-        description: `TX: ${hash.slice(0, 10)}...`,
-      });
+      txToast("Agreement instantly promoted", hash);
       return hash;
     },
     [writeContractAsync]
