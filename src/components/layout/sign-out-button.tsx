@@ -1,8 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { LogOut } from "lucide-react";
 
 export function SignOutButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const hostname = window.location.hostname;
+    setVisible(
+      hostname === "oatmilk.work" || hostname.endsWith(".oatmilk.work")
+    );
+  }, []);
+
+  if (!visible) return null;
+
   return (
     <a
       href="https://auth.oatmilk.work/flows/-/default/invalidation/"
